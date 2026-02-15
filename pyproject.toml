@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "tsumiaegekun"
+version = "0.1.0"
+description = "AI外部記憶基盤 - Devin/Claude Codeの開発ログを構造化・ベクトル化し再利用可能にする"
+authors = ["takagi"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.34.0"}
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.0"}
+asyncpg = "^0.30.0"
+pgvector = "^0.3.0"
+pydantic = "^2.0.0"
+pydantic-settings = "^2.0.0"
+httpx = "^0.28.0"
+openai = "^1.0.0"
+psycopg2-binary = "^2.9.11"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9.0"
+pytest = "^8.0.0"
+pytest-asyncio = "^0.25.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
