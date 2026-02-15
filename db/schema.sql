@@ -2,7 +2,7 @@
 -- Target: PostgreSQL on Railway
 -- Vector: pgvector (HNSW), cosine distance
 -- Notes:
--- - Embedding dim default: 3072 (text-embedding-3-large). Kept configurable per project.
+-- - Embedding dim default: 1536 (text-embedding-3-large w/ dimensions=1536). HNSW limit 2000.
 -- - Heavy ingest should be async; DB holds states for recovery.
 -- - No secrets stored; raw_log has retention policy.
 
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS kb_projects (
   allow_cross_project_search boolean NOT NULL DEFAULT false,
   constitution_mode text NOT NULL DEFAULT 'project_only', -- global_plus_project | project_only
   embedding_model text NOT NULL DEFAULT 'text-embedding-3-large',
-  embedding_dimensions int NOT NULL DEFAULT 3072,
+  embedding_dimensions int NOT NULL DEFAULT 1536,
   search_confidence_threshold double precision NOT NULL DEFAULT 0.70,
   recency_half_life_days int NOT NULL DEFAULT 90,
   constitution_dynamic_top_m int NOT NULL DEFAULT 10,
@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS ix_kb_sessions_project_created
 ON kb_sessions(project_key, created_at DESC);
 
 -- Chunks
--- NOTE: embedding is stored as vector(3072) for simplicity; also store model/dim per row for future coexistence.
+-- NOTE: embedding is stored as vector(1536) for simplicity; also store model/dim per row for future coexistence.
 CREATE TABLE IF NOT EXISTS kb_chunks (
   id bigserial PRIMARY KEY,
   project_key text NOT NULL REFERENCES kb_projects(project_key) ON DELETE CASCADE,
@@ -112,9 +112,9 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
   importance_score int NOT NULL DEFAULT 5, -- 0..10, normalized in queries by /10
   tags text[] NOT NULL DEFAULT '{}',
   meta jsonb NOT NULL DEFAULT '{}'::jsonb,
-  embedding vector(3072),
+  embedding vector(1536),
   embedding_model text NOT NULL DEFAULT 'text-embedding-3-large',
-  embedding_dimensions int NOT NULL DEFAULT 3072,
+  embedding_dimensions int NOT NULL DEFAULT 1536,
   search_vector tsvector,
   helpful_count int NOT NULL DEFAULT 0,
   unhelpful_count int NOT NULL DEFAULT 0,
