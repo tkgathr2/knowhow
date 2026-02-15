@@ -2,14 +2,38 @@ import hashlib
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
-from app.models import KbProject, KbSession
+from app.models import KbChunk, KbProject, KbSession
 
 router = APIRouter(tags=["ingest"])
+
+_openai_client: AsyncOpenAI | None = None
+
+
+def _get_openai_client() -> AsyncOpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
+    return _openai_client
+
+
+async def _create_embedding(text_value: str) -> list[float] | None:
+    if not settings.openai_api_key:
+        return None
+
+    client = _get_openai_client()
+    resp = await client.embeddings.create(
+        model=settings.embedding_model,
+        input=text_value,
+        dimensions=settings.embedding_dim,
+    )
+    return resp.data[0].embedding
 
 
 class IngestRequest(BaseModel):
@@ -31,9 +55,12 @@ class IngestResponse(BaseModel):
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_session(req: IngestRequest, db: AsyncSession = Depends(get_db)) -> IngestResponse:
-    project = await db.execute(select(KbProject).where(KbProject.project_key == req.project_key))
-    if not project.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail=f"Project '{req.project_key}' not found")
+    project_row = await db.execute(select(KbProject).where(KbProject.project_key == req.project_key))
+    project = project_row.scalar_one_or_none()
+    if not project:
+        project = KbProject(project_key=req.project_key, display_name=req.project_key)
+        db.add(project)
+        await db.flush()
 
     log_hash = hashlib.sha256(req.raw_log.encode("utf-8")).hexdigest()
 
@@ -59,14 +86,37 @@ async def ingest_session(req: IngestRequest, db: AsyncSession = Depends(get_db))
         normalized_log=req.raw_log.strip(),
         tags=req.tags,
         hash=log_hash,
-        ingest_state="queued",
+        ingest_state="summarized",
     )
     db.add(session)
+    await db.flush()
+
+    chunk = KbChunk(
+        project_key=req.project_key,
+        source_type="session",
+        source_id=session.id,
+        chunk_type="session_log",
+        content=session.normalized_log,
+        importance_score=5,
+        confidence_score=0.9,
+        tags=req.tags,
+        meta={"tool": req.tool, "status": req.status, "environment": req.environment},
+    )
+    db.add(chunk)
+
+    message = "Session ingested"
+    try:
+        embedding = await _create_embedding(session.normalized_log)
+        if embedding is not None:
+            chunk.embedding = embedding
+            chunk.embedding_model = settings.embedding_model
+            chunk.embedding_dimensions = settings.embedding_dim
+            session.ingest_state = "embedded"
+    except Exception:
+        session.ingest_state = "failed_embedding"
+        message = "Session ingested (embedding failed)"
+
     await db.commit()
     await db.refresh(session)
 
-    return IngestResponse(
-        session_id=session.id,
-        ingest_state=session.ingest_state,
-        message="Session queued for processing",
-    )
+    return IngestResponse(session_id=session.id, ingest_state=session.ingest_state, message=message)
