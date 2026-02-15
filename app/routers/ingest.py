@@ -99,6 +99,8 @@ async def ingest_session(req: IngestRequest, db: AsyncSession = Depends(get_db))
         content=session.normalized_log,
         importance_score=5,
         confidence_score=0.9,
+        alpha=9.0,
+        beta=1.0,
         tags=req.tags,
         meta={"tool": req.tool, "status": req.status, "environment": req.environment},
     )

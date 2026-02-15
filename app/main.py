@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import health, ingest, search
+from app.routers import feedback, health, ingest, search
 
 app = FastAPI(
     title="つみあげくん API",
@@ -20,3 +20,4 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(ingest.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
