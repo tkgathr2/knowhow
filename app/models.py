@@ -12,7 +12,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -119,6 +119,7 @@ class KbChunk(Base):
     confidence_score = Column(Float, nullable=False, default=0.5)
     last_helpful_at = Column(DateTime(timezone=True))
     last_unhelpful_at = Column(DateTime(timezone=True))
+    search_vector = Column(TSVECTOR)
     is_deprecated = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
