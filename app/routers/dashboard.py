@@ -195,13 +195,26 @@ async def get_tag_stats(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ) -> TagStatsResponse:
-    unnest = func.unnest(KbChunk.tags).column_valued("tag")
-    q = select(unnest, func.count().label("cnt"))
+    safe_limit = min(limit, 200)
     if project_key:
-        q = q.where(KbChunk.project_key == project_key)
-    q = q.group_by(literal_column("tag")).order_by(text("cnt DESC")).limit(min(limit, 200))
-
-    rows = await db.execute(q)
+        rows = await db.execute(
+            text(
+                "SELECT t, COUNT(*) AS cnt "
+                "FROM kb_chunks, unnest(tags) AS t "
+                "WHERE project_key = :pk "
+                "GROUP BY t ORDER BY cnt DESC LIMIT :lim"
+            ),
+            {"pk": project_key, "lim": safe_limit},
+        )
+    else:
+        rows = await db.execute(
+            text(
+                "SELECT t, COUNT(*) AS cnt "
+                "FROM kb_chunks, unnest(tags) AS t "
+                "GROUP BY t ORDER BY cnt DESC LIMIT :lim"
+            ),
+            {"lim": safe_limit},
+        )
     tags = [TagStat(tag=row[0], count=row[1]) for row in rows]
     return TagStatsResponse(tags=tags, total_tags=len(tags))
 
