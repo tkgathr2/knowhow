@@ -1,44 +1,22 @@
 import hashlib
 
 from fastapi import APIRouter, Depends
-from openai import AsyncOpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.embedding import clamp_top_k, create_embedding, escape_like
 from app.models import KbChunk, KbProject, KbSession
 
 router = APIRouter(tags=["devin"])
-
-_openai_client: AsyncOpenAI | None = None
-
-
-def _get_openai_client() -> AsyncOpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _openai_client
-
-
-async def _create_embedding(text_value: str) -> list[float] | None:
-    if not settings.openai_api_key:
-        return None
-
-    client = _get_openai_client()
-    resp = await client.embeddings.create(
-        model=settings.embedding_model,
-        input=text_value,
-        dimensions=settings.embedding_dim,
-    )
-    return resp.data[0].embedding
 
 
 class RecallRequest(BaseModel):
     project_key: str
     query: str
-    top_k: int = 5
+    top_k: int = Field(default=5, ge=1, le=100)
 
 
 class RecallChunk(BaseModel):
@@ -72,9 +50,11 @@ async def recall(
     min_confidence = project.search_confidence_threshold
     results_by_id: dict[int, RecallChunk] = {}
 
+    top_k = clamp_top_k(req.top_k)
+
     query_embedding = None
     try:
-        query_embedding = await _create_embedding(req.query)
+        query_embedding = await create_embedding(req.query)
     except Exception:
         query_embedding = None
 
@@ -98,7 +78,7 @@ async def recall(
             )
             .where(*base_where, KbChunk.embedding.isnot(None))
             .order_by(similarity.desc())
-            .limit(req.top_k)
+            .limit(top_k)
         )
 
         vector_rows = await db.execute(vector_q)
@@ -128,7 +108,7 @@ async def recall(
         )
         .params(q=req.query)
         .order_by(KbChunk.confidence_score.desc())
-        .limit(req.top_k)
+        .limit(top_k)
     )
 
     fts_rows = await db.execute(fts_q)
@@ -144,6 +124,7 @@ async def recall(
         )
 
     if not results_by_id:
+        escaped = escape_like(req.query)
         like_q = (
             select(
                 KbChunk.id,
@@ -154,10 +135,10 @@ async def recall(
             )
             .where(
                 *base_where,
-                KbChunk.content.ilike(f"%{req.query}%"),
+                KbChunk.content.ilike(f"%{escaped}%"),
             )
             .order_by(KbChunk.confidence_score.desc())
-            .limit(req.top_k)
+            .limit(top_k)
         )
         like_rows = await db.execute(like_q)
         for row in like_rows:
@@ -171,7 +152,7 @@ async def recall(
 
     results = sorted(
         results_by_id.values(), key=lambda r: r.score, reverse=True
-    )[: req.top_k]
+    )[:top_k]
     return RecallResponse(
         results=results,
         query=req.query,
@@ -258,7 +239,7 @@ async def memorize(
     db.add(chunk)
 
     try:
-        embedding = await _create_embedding(session.normalized_log)
+        embedding = await create_embedding(session.normalized_log)
         if embedding is not None:
             chunk.embedding = embedding
             chunk.embedding_model = settings.embedding_model
