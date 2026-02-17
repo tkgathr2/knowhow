@@ -143,6 +143,32 @@ async def recall(
             tags=row.tags or [],
         )
 
+    if not results_by_id:
+        like_q = (
+            select(
+                KbChunk.id,
+                KbChunk.content,
+                KbChunk.chunk_type,
+                KbChunk.tags,
+                KbChunk.confidence_score,
+            )
+            .where(
+                *base_where,
+                KbChunk.content.ilike(f"%{req.query}%"),
+            )
+            .order_by(KbChunk.confidence_score.desc())
+            .limit(req.top_k)
+        )
+        like_rows = await db.execute(like_q)
+        for row in like_rows:
+            results_by_id[row.id] = RecallChunk(
+                chunk_id=row.id,
+                content=row.content,
+                chunk_type=row.chunk_type,
+                score=float(row.confidence_score) * 0.8,
+                tags=row.tags or [],
+            )
+
     results = sorted(
         results_by_id.values(), key=lambda r: r.score, reverse=True
     )[: req.top_k]
