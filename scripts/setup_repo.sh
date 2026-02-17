@@ -6,7 +6,7 @@ API_URL="https://knowhow.up.railway.app"
 usage() {
   echo "Usage: $0 <target-repo-path>"
   echo ""
-  echo "Adds つみあげくん .devin/rules to the target repository."
+  echo "Adds ノウハウキング君 .devin/rules to the target repository."
   echo "This enables automatic recall/memorize in Devin sessions."
   echo ""
   echo "Example:"
@@ -30,9 +30,9 @@ REPO_NAME=$(basename "$TARGET")
 mkdir -p "$TARGET/.devin"
 
 cat > "$TARGET/.devin/rules" << 'RULES_EOF'
-## つみあげくん (Knowledge DB) 自動連動ルール
+## ノウハウキング君 (Knowledge DB) 自動連動ルール
 
-つみあげくん は AI 外部記憶基盤です。セッション中に過去の知見を検索し、セッション終了時に学びを記録します。
+ノウハウキング君 は AI 外部記憶基盤です。セッション中に過去の知見を検索し、セッション終了時に学びを記録します。
 
 ### API Base URL
 https://knowhow.up.railway.app
@@ -82,4 +82,4 @@ echo ""
 echo "Next steps:"
 echo "  cd $TARGET"
 echo "  git add .devin/rules"
-echo "  git commit -m 'chore: add つみあげくん auto-integration'"
+echo "  git commit -m 'chore: add ノウハウキング君 auto-integration'"
