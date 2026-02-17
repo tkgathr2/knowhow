@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノウハウキング君 Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .chunk-content { white-space: pre-wrap; word-break: break-word; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+        </svg>
+      </div>
+      <h1 class="text-lg font-bold text-gray-900">ノウハウキング君</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">AI外部記憶ダッシュボード</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="loadAll()" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">
+        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        更新
+      </button>
+      <span id="health-badge" class="text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-500">...</span>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-7xl mx-auto px-4 py-6">
+
+  <div id="stats-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></div>
+
+  <div class="flex flex-col lg:flex-row gap-6">
+
+    <div class="lg:w-1/3 space-y-6">
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h2 class="font-semibold text-sm text-gray-700">プロジェクト一覧</h2>
+          <span id="project-count" class="text-xs text-gray-400"></span>
+        </div>
+        <div id="project-list" class="divide-y divide-gray-50 max-h-96 overflow-y-auto"></div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-100">
+          <h2 class="font-semibold text-sm text-gray-700">検索</h2>
+        </div>
+        <div class="p-4 space-y-3">
+          <select id="search-project" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"></select>
+          <div class="flex gap-2">
+            <input id="search-query" type="text" placeholder="キーワードを入力..." class="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" onkeydown="if(event.key==='Enter')doSearch()">
+            <button onclick="doSearch()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">検索</button>
+          </div>
+          <div id="search-results" class="space-y-2 max-h-80 overflow-y-auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lg:w-2/3 space-y-6">
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h2 class="font-semibold text-sm text-gray-700">最近のセッション</h2>
+          <div class="flex items-center gap-2">
+            <select id="filter-project" class="text-xs border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500" onchange="loadRecent()">
+              <option value="">全プロジェクト</option>
+            </select>
+          </div>
+        </div>
+        <div id="recent-list" class="divide-y divide-gray-50"></div>
+        <div id="recent-empty" class="hidden p-8 text-center text-gray-400 text-sm">セッションがありません</div>
+      </div>
+
+      <div id="chunk-detail" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden fade-in">
+        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h2 class="font-semibold text-sm text-gray-700">チャンク詳細</h2>
+          <button onclick="document.getElementById('chunk-detail').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div id="chunk-detail-body" class="p-4"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">
+  ノウハウキング君 v0.1.0 &mdash; AI外部記憶基盤
+</footer>
+
+<script>
+const API = window.location.origin;
+
+const COLORS = [
+  'bg-blue-100 text-blue-700', 'bg-green-100 text-green-700', 'bg-purple-100 text-purple-700',
+  'bg-orange-100 text-orange-700', 'bg-pink-100 text-pink-700', 'bg-teal-100 text-teal-700',
+  'bg-yellow-100 text-yellow-700', 'bg-red-100 text-red-700', 'bg-indigo-100 text-indigo-700',
+];
+
+function tagColor(tag) {
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) h = ((h << 5) - h + tag.charCodeAt(i)) | 0;
+  return COLORS[Math.abs(h) % COLORS.length];
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function relTime(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = (now - d) / 1000;
+  if (diff < 60) return '数秒前';
+  if (diff < 3600) return Math.floor(diff / 60) + '分前';
+  if (diff < 86400) return Math.floor(diff / 3600) + '時間前';
+  if (diff < 604800) return Math.floor(diff / 86400) + '日前';
+  return d.toLocaleDateString('ja-JP');
+}
+
+async function api(path, opts) {
+  try {
+    const r = await fetch(API + path, opts);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function checkHealth() {
+  const badge = document.getElementById('health-badge');
+  const d = await api('/health');
+  if (d && d.status === 'ok') {
+    badge.textContent = 'Online';
+    badge.className = 'text-xs px-2 py-1 rounded-full bg-green-100 text-green-700';
+  } else {
+    badge.textContent = 'Offline';
+    badge.className = 'text-xs px-2 py-1 rounded-full bg-red-100 text-red-700';
+  }
+}
+
+async function loadStats() {
+  const d = await api('/api/stats');
+  if (!d) return;
+
+  const cards = [
+    { label: 'プロジェクト', value: d.total_projects, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>', color: 'indigo' },
+    { label: 'セッション', value: d.total_sessions, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>', color: 'blue' },
+    { label: 'チャンク', value: d.total_chunks, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>', color: 'emerald' },
+    { label: 'Embedding済', value: d.total_embedded, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>', color: 'amber' },
+  ];
+
+  document.getElementById('stats-cards').innerHTML = cards.map(c => `
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 fade-in">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 bg-${c.color}-100 rounded-lg flex items-center justify-center">
+          <svg class="w-5 h-5 text-${c.color}-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">${c.icon}</svg>
+        </div>
+        <div>
+          <div class="text-2xl font-bold text-gray-900">${c.value}</div>
+          <div class="text-xs text-gray-500">${c.label}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  const projList = document.getElementById('project-list');
+  const searchProj = document.getElementById('search-project');
+  const filterProj = document.getElementById('filter-project');
+  document.getElementById('project-count').textContent = d.projects.length + '件';
+
+  projList.innerHTML = d.projects.sort((a, b) => (b.chunk_count - a.chunk_count)).map(p => `
+    <div class="px-4 py-3 hover:bg-gray-50 cursor-pointer transition" onclick="filterByProject('${esc(p.project_key)}')">
+      <div class="flex items-center justify-between">
+        <div class="font-medium text-sm text-gray-800 truncate">${esc(p.display_name || p.project_key)}</div>
+        <div class="flex items-center gap-2 text-xs text-gray-400 flex-shrink-0">
+          <span title="チャンク数">${p.chunk_count}</span>
+          ${p.embedded_chunk_count > 0 ? '<span class="w-2 h-2 bg-green-400 rounded-full" title="Embedding済"></span>' : ''}
+        </div>
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">${p.project_key}${p.latest_memorize_at ? ' &middot; ' + relTime(p.latest_memorize_at) : ''}</div>
+    </div>
+  `).join('');
+
+  const projOptions = d.projects.map(p => `<option value="${esc(p.project_key)}">${esc(p.display_name || p.project_key)}</option>`).join('');
+  searchProj.innerHTML = projOptions;
+  filterProj.innerHTML = '<option value="">全プロジェクト</option>' + projOptions;
+}
+
+async function loadRecent() {
+  const pk = document.getElementById('filter-project').value;
+  const url = '/api/recent?limit=30' + (pk ? '&project_key=' + encodeURIComponent(pk) : '');
+  const d = await api(url);
+  if (!d) return;
+
+  const list = document.getElementById('recent-list');
+  const empty = document.getElementById('recent-empty');
+
+  if (d.entries.length === 0) {
+    list.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  list.innerHTML = d.entries.map(e => `
+    <div class="px-4 py-3 hover:bg-gray-50 cursor-pointer transition fade-in" onclick="showSession(${e.session_id}, '${esc(e.project_key)}')">
+      <div class="flex items-center justify-between mb-1">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono text-gray-400">#${e.session_id}</span>
+          <span class="text-xs font-medium text-gray-600">${esc(e.project_key)}</span>
+          ${e.has_embedding ? '<span class="w-2 h-2 bg-green-400 rounded-full" title="Embedding済"></span>' : '<span class="w-2 h-2 bg-gray-300 rounded-full" title="Embedding未"></span>'}
+        </div>
+        <span class="text-xs text-gray-400">${relTime(e.created_at)}</span>
+      </div>
+      <div class="text-sm text-gray-700 line-clamp-2">${esc(e.content_preview)}</div>
+      <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+        ${(e.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}
+        <span class="tag bg-gray-100 text-gray-500">${esc(e.tool)}</span>
+        <span class="tag ${e.status === 'success' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}">${esc(e.status)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function showSession(sessionId, projectKey) {
+  const d = await api('/api/devin/recall', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_key: projectKey, query: '', top_k: 100 }),
+  });
+
+  const detail = document.getElementById('chunk-detail');
+  const body = document.getElementById('chunk-detail-body');
+  detail.classList.remove('hidden');
+  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  if (!d || d.results.length === 0) {
+    body.innerHTML = '<p class="text-gray-400 text-sm">チャンクが見つかりませんでした</p>';
+    return;
+  }
+
+  body.innerHTML = d.results.map(r => `
+    <div class="mb-4 p-3 border border-gray-100 rounded-lg hover:border-gray-200 transition">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono text-gray-400">chunk #${r.chunk_id}</span>
+          <span class="tag bg-indigo-100 text-indigo-600">${esc(r.chunk_type)}</span>
+          <span class="text-xs text-gray-400">score: ${r.score.toFixed(3)}</span>
+        </div>
+        <div class="flex items-center gap-1">
+          ${(r.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}
+        </div>
+      </div>
+      <div class="chunk-content text-sm text-gray-700 bg-gray-50 rounded-lg p-3 max-h-48 overflow-y-auto">${esc(r.content)}</div>
+    </div>
+  `).join('');
+}
+
+async function doSearch() {
+  const pk = document.getElementById('search-project').value;
+  const q = document.getElementById('search-query').value.trim();
+  const results = document.getElementById('search-results');
+
+  if (!q) { results.innerHTML = '<p class="text-xs text-gray-400">キーワードを入力してください</p>'; return; }
+
+  results.innerHTML = '<p class="text-xs text-gray-400">検索中...</p>';
+
+  const d = await api('/api/devin/recall', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_key: pk, query: q, top_k: 10 }),
+  });
+
+  if (!d || d.results.length === 0) {
+    results.innerHTML = '<p class="text-xs text-gray-400">結果なし</p>';
+    return;
+  }
+
+  results.innerHTML = d.results.map(r => `
+    <div class="p-2.5 border border-gray-100 rounded-lg hover:border-indigo-200 cursor-pointer transition fade-in" onclick="showChunkDetail(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs font-mono text-gray-400">#${r.chunk_id}</span>
+        <span class="text-xs text-indigo-500 font-medium">${r.score.toFixed(3)}</span>
+      </div>
+      <div class="text-xs text-gray-600 line-clamp-3">${esc(r.content.substring(0, 200))}</div>
+      <div class="flex gap-1 mt-1">${(r.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}</div>
+    </div>
+  `).join('');
+}
+
+function showChunkDetail(chunk) {
+  const detail = document.getElementById('chunk-detail');
+  const body = document.getElementById('chunk-detail-body');
+  detail.classList.remove('hidden');
+  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  body.innerHTML = `
+    <div class="space-y-3">
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-sm font-mono text-gray-500">Chunk #${chunk.chunk_id}</span>
+        <span class="tag bg-indigo-100 text-indigo-600">${esc(chunk.chunk_type)}</span>
+        <span class="text-xs text-gray-400">Score: ${chunk.score.toFixed(4)}</span>
+        ${(chunk.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}
+      </div>
+      <div class="chunk-content text-sm text-gray-700 bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">${esc(chunk.content)}</div>
+    </div>
+  `;
+}
+
+function filterByProject(pk) {
+  document.getElementById('filter-project').value = pk;
+  document.getElementById('search-project').value = pk;
+  loadRecent();
+}
+
+function loadAll() {
+  checkHealth();
+  loadStats();
+  loadRecent();
+}
+
+loadAll();
+</script>
+</body>
+</html>
