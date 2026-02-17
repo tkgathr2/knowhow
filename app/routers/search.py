@@ -1,42 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
-from openai import AsyncOpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Select, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
+from app.embedding import clamp_top_k, create_embedding, escape_like
 from app.models import KbChunk, KbProject
 
 router = APIRouter(tags=["search"])
-
-_openai_client: AsyncOpenAI | None = None
-
-
-def _get_openai_client() -> AsyncOpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _openai_client
-
-
-async def _create_embedding(text_value: str) -> list[float] | None:
-    if not settings.openai_api_key:
-        return None
-
-    client = _get_openai_client()
-    resp = await client.embeddings.create(
-        model=settings.embedding_model,
-        input=text_value,
-        dimensions=settings.embedding_dim,
-    )
-    return resp.data[0].embedding
 
 
 class SearchRequest(BaseModel):
     project_key: str
     query: str
-    top_k: int = 10
+    top_k: int = Field(default=10, ge=1, le=100)
     threshold: float | None = None
 
 
@@ -89,9 +66,11 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
 
     results_by_id: dict[int, ChunkResult] = {}
 
+    top_k = clamp_top_k(req.top_k)
+
     query_embedding = None
     try:
-        query_embedding = await _create_embedding(req.query)
+        query_embedding = await create_embedding(req.query)
     except Exception:
         query_embedding = None
 
@@ -102,7 +81,7 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
             .add_columns(similarity)
             .where(KbChunk.embedding.isnot(None))
             .order_by(similarity.desc())
-            .limit(req.top_k)
+            .limit(top_k)
         )
 
         vector_rows = await db.execute(vector_q)
@@ -127,7 +106,7 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
         )
         .params(q=req.query)
         .order_by(KbChunk.confidence_score.desc(), KbChunk.importance_score.desc())
-        .limit(req.top_k)
+        .limit(top_k)
     )
 
     fts_rows = await db.execute(fts_q)
@@ -147,11 +126,12 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
         )
 
     if not results_by_id:
+        escaped = escape_like(req.query)
         like_q = (
             _base_chunk_query(req.project_key, min_confidence)
-            .where(KbChunk.content.ilike(f"%{req.query}%"))
+            .where(KbChunk.content.ilike(f"%{escaped}%"))
             .order_by(KbChunk.confidence_score.desc(), KbChunk.importance_score.desc())
-            .limit(req.top_k)
+            .limit(top_k)
         )
         like_rows = await db.execute(like_q)
         for row in like_rows:
@@ -167,5 +147,5 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
                 confidence_score=row.confidence_score,
             )
 
-    results = sorted(results_by_id.values(), key=lambda r: r.score, reverse=True)[: req.top_k]
+    results = sorted(results_by_id.values(), key=lambda r: r.score, reverse=True)[:top_k]
     return SearchResponse(results=results, query=req.query, total=len(results))

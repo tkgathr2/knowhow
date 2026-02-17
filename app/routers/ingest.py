@@ -2,38 +2,16 @@ import hashlib
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from openai import AsyncOpenAI
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.embedding import create_embedding
 from app.models import KbChunk, KbProject, KbSession
 
 router = APIRouter(tags=["ingest"])
-
-_openai_client: AsyncOpenAI | None = None
-
-
-def _get_openai_client() -> AsyncOpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _openai_client
-
-
-async def _create_embedding(text_value: str) -> list[float] | None:
-    if not settings.openai_api_key:
-        return None
-
-    client = _get_openai_client()
-    resp = await client.embeddings.create(
-        model=settings.embedding_model,
-        input=text_value,
-        dimensions=settings.embedding_dim,
-    )
-    return resp.data[0].embedding
 
 
 class IngestRequest(BaseModel):
@@ -108,7 +86,7 @@ async def ingest_session(req: IngestRequest, db: AsyncSession = Depends(get_db))
 
     message = "Session ingested"
     try:
-        embedding = await _create_embedding(session.normalized_log)
+        embedding = await create_embedding(session.normalized_log)
         if embedding is not None:
             chunk.embedding = embedding
             chunk.embedding_model = settings.embedding_model
