@@ -94,36 +94,42 @@ async def find_duplicates(
         params["pk"] = project_key
 
     q = text(f"""
-        SELECT a.id AS id_a, b.id AS id_b,
-               1 - (a.embedding <=> b.embedding) AS similarity,
-               a.project_key,
-               LEFT(a.content, 100) AS preview_a,
-               LEFT(b.content, 100) AS preview_b
-        FROM kb_chunks a
-        JOIN kb_chunks b ON a.id < b.id
-             AND a.project_key = b.project_key
-             AND a.embedding IS NOT NULL
-             AND b.embedding IS NOT NULL
-        WHERE 1 - (a.embedding <=> b.embedding) >= :threshold
-              AND a.is_deprecated = false
-              AND b.is_deprecated = false
-              {where_clause}
+        SELECT id_a, id_b, similarity, project_key, preview_a, preview_b
+        FROM (
+            SELECT a.id AS id_a, b.id AS id_b,
+                   1 - (a.embedding <=> b.embedding) AS similarity,
+                   a.project_key,
+                   LEFT(a.content, 100) AS preview_a,
+                   LEFT(b.content, 100) AS preview_b
+            FROM kb_chunks a
+            JOIN kb_chunks b ON a.id < b.id
+                 AND a.project_key = b.project_key
+            WHERE a.embedding IS NOT NULL
+                  AND b.embedding IS NOT NULL
+                  AND a.is_deprecated = false
+                  AND b.is_deprecated = false
+                  {where_clause}
+        ) sub
+        WHERE similarity >= :threshold
         ORDER BY similarity DESC
         LIMIT :lim
     """)
 
-    rows = await db.execute(q, params)
-    candidates = [
-        DuplicateCandidate(
-            chunk_id_a=row.id_a,
-            chunk_id_b=row.id_b,
-            similarity=float(row.similarity),
-            project_key=row.project_key,
-            preview_a=row.preview_a or "",
-            preview_b=row.preview_b or "",
-        )
-        for row in rows
-    ]
+    try:
+        rows = await db.execute(q, params)
+        candidates = [
+            DuplicateCandidate(
+                chunk_id_a=row.id_a,
+                chunk_id_b=row.id_b,
+                similarity=float(row.similarity),
+                project_key=row.project_key,
+                preview_a=row.preview_a or "",
+                preview_b=row.preview_b or "",
+            )
+            for row in rows
+        ]
+    except Exception:
+        candidates = []
     return DuplicatesResponse(candidates=candidates, total=len(candidates))
 
 
