@@ -119,6 +119,8 @@ class KbChunk(Base):
     confidence_score = Column(Float, nullable=False, default=0.5)
     last_helpful_at = Column(DateTime(timezone=True))
     last_unhelpful_at = Column(DateTime(timezone=True))
+    last_recalled_at = Column(DateTime(timezone=True))
+    recall_count = Column(Integer, nullable=False, default=0)
     search_vector = Column(TSVECTOR)
     is_deprecated = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -168,3 +170,33 @@ class KbIssue(Base):
     __table_args__ = (
         Index("ix_kb_issues_project_status", "project_key", "status"),
     )
+
+
+class KbRecallLog(Base):
+    __tablename__ = "kb_recall_log"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    project_key = Column(String, ForeignKey("kb_projects.project_key", ondelete="CASCADE"), nullable=False)
+    query = Column(Text, nullable=False)
+    returned_chunk_ids = Column(ARRAY(BigInteger), nullable=False, default=list)
+    top_score = Column(Float)
+    result_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_kb_recall_log_project_created", "project_key", "created_at"),
+    )
+
+
+class KbExternalSource(Base):
+    __tablename__ = "kb_external_sources"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_type = Column(String, nullable=False)
+    source_url = Column(Text, nullable=False)
+    project_key = Column(String, ForeignKey("kb_projects.project_key", ondelete="SET NULL"))
+    config = Column(JSONB, nullable=False, default=dict)
+    last_synced_at = Column(DateTime(timezone=True))
+    sync_count = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -1,4 +1,5 @@
 import hashlib
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.embedding import clamp_top_k, create_embedding, escape_like
-from app.models import KbChunk, KbProject, KbSession
+from app.models import KbChunk, KbProject, KbRecallLog, KbSession
 
 router = APIRouter(tags=["devin"])
 
@@ -153,6 +154,30 @@ async def recall(
     results = sorted(
         results_by_id.values(), key=lambda r: r.score, reverse=True
     )[:top_k]
+
+    returned_ids = [r.chunk_id for r in results]
+    top_score = results[0].score if results else None
+
+    recall_log = KbRecallLog(
+        project_key=req.project_key,
+        query=req.query,
+        returned_chunk_ids=returned_ids,
+        top_score=top_score,
+        result_count=len(results),
+    )
+    db.add(recall_log)
+
+    if returned_ids:
+        now = datetime.now(UTC)
+        chunk_rows = await db.execute(
+            select(KbChunk).where(KbChunk.id.in_(returned_ids))
+        )
+        for chunk in chunk_rows.scalars():
+            chunk.last_recalled_at = now
+            chunk.recall_count += 1
+
+    await db.commit()
+
     return RecallResponse(
         results=results,
         query=req.query,
