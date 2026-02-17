@@ -63,13 +63,28 @@ curl -s -X POST https://knowhow.up.railway.app/api/feedback \
 - 新プロジェクトを作る時
 - ※既存コードの修正・バグ修正には適用しない
 
-### 調査フロー（3サイト必須調査）
+### 調査フロー（メジャーサイトから広く調査）
 
-新機能の実装指示を受けたら、コードを書く前に以下の3サイトを調査する：
+新機能の実装指示を受けたら、コードを書く前に世の中のメジャーなサイトからパーツを探す。
+最大30サイトまで参照可。ただし信頼性の高い有名サイトに限定すること。
 
-1. **GitHub** — リポジトリ検索（スター数・Issue・メンテ状況を確認）
-2. **パッケージレジストリ** — npm（JS）/ PyPI（Python）/ crates.io（Rust）等（DL数・最終更新日を確認）
-3. **Awesome Lists / 公式ドキュメント推奨** — 各フレームワーク公式が推奨するライブラリを確認
+#### 参照OKなサイト例（これらに限定しないが、同等の信頼性があるサイトのみ許可）
+
+| カテゴリ | サイト例 |
+|----------|----------|
+| ソースコード | GitHub, GitLab, Bitbucket |
+| JSパッケージ | npm, yarn, pnpm, jsDelivr, unpkg |
+| Pythonパッケージ | PyPI, conda-forge |
+| 他言語パッケージ | crates.io (Rust), pkg.go.dev (Go), RubyGems, NuGet, Maven Central |
+| キュレーション | Awesome Lists (awesome-xxx), OpenBase, LibHunt |
+| 公式ドキュメント | React公式, Next.js公式, FastAPI公式, Django公式 等 |
+| 技術コミュニティ | Stack Overflow, Dev.to, Zenn, Qiita |
+| 比較サイト | Snyk Advisor, Socket.dev, Bundlephobia |
+
+#### 参照NGなサイト
+- 個人ブログ（技術コミュニティサイト以外）
+- 無名・信頼性不明のサイト
+- アフィリエイト目的のまとめサイト
 
 ### 採用基準（全て満たすこと）
 
