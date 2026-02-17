@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import bulk, dashboard, devin, feedback, health, ingest, search
 
 app = FastAPI(
-    title="つみあげくん API",
+    title="ノウハウキング君 API",
     description="AI外部記憶基盤 - 開発ログを構造化・ベクトル化し再利用可能にする",
     version="0.1.0",
 )
