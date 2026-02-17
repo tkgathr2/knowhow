@@ -11,7 +11,12 @@
   .fade-in { animation: fadeIn 0.3s ease-in; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   .chunk-content { white-space: pre-wrap; word-break: break-word; }
-  .tag { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
+  .tag:hover { opacity: 0.8; }
+  .tab-btn { padding: 6px 16px; font-size: 0.8rem; font-weight: 500; border-radius: 8px; transition: all 0.15s; cursor: pointer; }
+  .tab-btn.active { background: #4f46e5; color: white; }
+  .tab-btn:not(.active) { background: #f3f4f6; color: #6b7280; }
+  .tab-btn:not(.active):hover { background: #e5e7eb; }
 </style>
 </head>
 <body class="bg-gray-50 text-gray-900 min-h-screen">
@@ -57,6 +62,10 @@
           <h2 class="font-semibold text-sm text-gray-700">検索</h2>
         </div>
         <div class="p-4 space-y-3">
+          <div class="flex gap-2 mb-2">
+            <button id="tab-project" class="tab-btn active" onclick="setSearchMode('project')">プロジェクト内</button>
+            <button id="tab-cross" class="tab-btn" onclick="setSearchMode('cross')">横断検索</button>
+          </div>
           <select id="search-project" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"></select>
           <div class="flex gap-2">
             <input id="search-query" type="text" placeholder="キーワードを入力..." class="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" onkeydown="if(event.key==='Enter')doSearch()">
@@ -65,20 +74,36 @@
           <div id="search-results" class="space-y-2 max-h-80 overflow-y-auto"></div>
         </div>
       </div>
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h2 class="font-semibold text-sm text-gray-700">タグクラウド</h2>
+          <button onclick="clearTagFilter()" id="clear-tag-btn" class="hidden text-xs text-indigo-600 hover:text-indigo-800">クリア</button>
+        </div>
+        <div id="tag-cloud" class="p-4 flex flex-wrap gap-1.5 max-h-48 overflow-y-auto"></div>
+      </div>
     </div>
 
     <div class="lg:w-2/3 space-y-6">
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 class="font-semibold text-sm text-gray-700">最近のセッション</h2>
           <div class="flex items-center gap-2">
-            <select id="filter-project" class="text-xs border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500" onchange="loadRecent()">
+            <h2 class="font-semibold text-sm text-gray-700">最近のセッション</h2>
+            <span id="recent-total" class="text-xs text-gray-400"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <select id="filter-project" class="text-xs border border-gray-300 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500" onchange="resetAndLoadRecent()">
               <option value="">全プロジェクト</option>
             </select>
           </div>
         </div>
         <div id="recent-list" class="divide-y divide-gray-50"></div>
         <div id="recent-empty" class="hidden p-8 text-center text-gray-400 text-sm">セッションがありません</div>
+        <div id="pagination" class="hidden px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+          <button id="prev-btn" onclick="changePage(-1)" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">前へ</button>
+          <span id="page-info" class="text-xs text-gray-500"></span>
+          <button id="next-btn" onclick="changePage(1)" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">次へ</button>
+        </div>
       </div>
 
       <div id="chunk-detail" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden fade-in">
@@ -95,13 +120,17 @@
 </div>
 
 <footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">
-  ノウハウキング君 v0.1.0 &mdash; AI外部記憶基盤
+  ノウハウキング君 v0.2.0 &mdash; AI外部記憶基盤
 </footer>
 
 <script>
 const API = window.location.origin;
+let searchMode = 'project';
+let currentOffset = 0;
+let currentTag = null;
+const PAGE_SIZE = 20;
 
-const COLORS = [
+const COLORS= [
   'bg-blue-100 text-blue-700', 'bg-green-100 text-green-700', 'bg-purple-100 text-purple-700',
   'bg-orange-100 text-orange-700', 'bg-pink-100 text-pink-700', 'bg-teal-100 text-teal-700',
   'bg-yellow-100 text-yellow-700', 'bg-red-100 text-red-700', 'bg-indigo-100 text-indigo-700',
@@ -198,18 +227,30 @@ async function loadStats() {
   filterProj.innerHTML = '<option value="">全プロジェクト</option>' + projOptions;
 }
 
+function setSearchMode(mode) {
+  searchMode = mode;
+  document.getElementById('tab-project').className = 'tab-btn' + (mode === 'project' ? ' active' : '');
+  document.getElementById('tab-cross').className = 'tab-btn' + (mode === 'cross' ? ' active' : '');
+  document.getElementById('search-project').style.display = mode === 'project' ? '' : 'none';
+}
+
 async function loadRecent() {
   const pk = document.getElementById('filter-project').value;
-  const url = '/api/recent?limit=30' + (pk ? '&project_key=' + encodeURIComponent(pk) : '');
+  let url = '/api/recent?limit=' + PAGE_SIZE + '&offset=' + currentOffset;
+  if (pk) url += '&project_key=' + encodeURIComponent(pk);
+  if (currentTag) url += '&tag=' + encodeURIComponent(currentTag);
   const d = await api(url);
   if (!d) return;
 
   const list = document.getElementById('recent-list');
   const empty = document.getElementById('recent-empty');
+  const pagination = document.getElementById('pagination');
+  document.getElementById('recent-total').textContent = d.total + '件';
 
   if (d.entries.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
+    pagination.classList.add('hidden');
     return;
   }
   empty.classList.add('hidden');
@@ -226,12 +267,67 @@ async function loadRecent() {
       </div>
       <div class="text-sm text-gray-700 line-clamp-2">${esc(e.content_preview)}</div>
       <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
-        ${(e.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}
+        ${(e.tags || []).map(t => `<span class="tag ${tagColor(t)}" onclick="event.stopPropagation(); filterByTag('${esc(t)}')">${esc(t)}</span>`).join('')}
         <span class="tag bg-gray-100 text-gray-500">${esc(e.tool)}</span>
         <span class="tag ${e.status === 'success' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}">${esc(e.status)}</span>
       </div>
     </div>
   `).join('');
+
+  if (d.total > PAGE_SIZE) {
+    pagination.classList.remove('hidden');
+    const page = Math.floor(currentOffset / PAGE_SIZE) + 1;
+    const totalPages = Math.ceil(d.total / PAGE_SIZE);
+    document.getElementById('page-info').textContent = page + ' / ' + totalPages;
+    document.getElementById('prev-btn').disabled = currentOffset === 0;
+    document.getElementById('next-btn').disabled = !d.has_more;
+  } else {
+    pagination.classList.add('hidden');
+  }
+}
+
+function changePage(dir) {
+  currentOffset = Math.max(0, currentOffset + dir * PAGE_SIZE);
+  loadRecent();
+}
+
+function resetAndLoadRecent() {
+  currentOffset = 0;
+  loadRecent();
+}
+
+async function loadTags() {
+  const pk = document.getElementById('filter-project').value;
+  let url = '/api/tags?limit=40';
+  if (pk) url += '&project_key=' + encodeURIComponent(pk);
+  const d = await api(url);
+  if (!d) return;
+  const cloud = document.getElementById('tag-cloud');
+  if (d.tags.length === 0) { cloud.innerHTML = '<span class="text-xs text-gray-400">タグなし</span>'; return; }
+  const maxCount = Math.max(...d.tags.map(t => t.count));
+  cloud.innerHTML = d.tags.map(t => {
+    const size = 0.7 + (t.count / maxCount) * 0.5;
+    const active = currentTag === t.tag ? 'ring-2 ring-indigo-500 ring-offset-1' : '';
+    return `<span class="tag ${tagColor(t.tag)} ${active}" style="font-size:${size}rem" onclick="filterByTag('${esc(t.tag)}')" title="${t.count}件">${esc(t.tag)}</span>`;
+  }).join('');
+}
+
+function filterByTag(tag) {
+  currentTag = currentTag === tag ? null : tag;
+  currentOffset = 0;
+  const clearBtn = document.getElementById('clear-tag-btn');
+  if (currentTag) { clearBtn.classList.remove('hidden'); clearBtn.textContent = currentTag + ' x'; }
+  else { clearBtn.classList.add('hidden'); }
+  loadRecent();
+  loadTags();
+}
+
+function clearTagFilter() {
+  currentTag = null;
+  currentOffset = 0;
+  document.getElementById('clear-tag-btn').classList.add('hidden');
+  loadRecent();
+  loadTags();
 }
 
 async function showSession(sessionId, projectKey) {
@@ -252,7 +348,7 @@ async function showSession(sessionId, projectKey) {
   }
 
   body.innerHTML = d.results.map(r => `
-    <div class="mb-4 p-3 border border-gray-100 rounded-lg hover:border-gray-200 transition">
+    <div class="mb-4 p-3 border border-gray-100 rounded-lg hover:border-gray-200 transition cursor-pointer" onclick="loadChunkDetail(${r.chunk_id})">
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2">
           <span class="text-xs font-mono text-gray-400">chunk #${r.chunk_id}</span>
@@ -260,7 +356,7 @@ async function showSession(sessionId, projectKey) {
           <span class="text-xs text-gray-400">score: ${r.score.toFixed(3)}</span>
         </div>
         <div class="flex items-center gap-1">
-          ${(r.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}
+          ${(r.tags || []).map(t => `<span class="tag ${tagColor(t)}" onclick="event.stopPropagation(); filterByTag('${esc(t)}')">${esc(t)}</span>`).join('')}
         </div>
       </div>
       <div class="chunk-content text-sm text-gray-700 bg-gray-50 rounded-lg p-3 max-h-48 overflow-y-auto">${esc(r.content)}</div>
@@ -268,68 +364,88 @@ async function showSession(sessionId, projectKey) {
   `).join('');
 }
 
+async function loadChunkDetail(chunkId) {
+  const d = await api('/api/chunks/' + chunkId);
+  if (!d) return;
+  const detail = document.getElementById('chunk-detail');
+  const body = document.getElementById('chunk-detail-body');
+  detail.classList.remove('hidden');
+  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  body.innerHTML = `
+    <div class="space-y-3">
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-sm font-mono text-gray-500">Chunk #${d.chunk_id}</span>
+        <span class="tag bg-indigo-100 text-indigo-600">${esc(d.chunk_type)}</span>
+        <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">${esc(d.project_key)}</span>
+        ${d.is_deprecated ? '<span class="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">非推奨</span>' : ''}
+        ${(d.tags || []).map(t => `<span class="tag ${tagColor(t)}" onclick="filterByTag('${esc(t)}')">${esc(t)}</span>`).join('')}
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <div class="bg-gray-50 rounded-lg p-2"><div class="text-gray-400">信頼度</div><div class="font-bold text-gray-700">${(d.confidence_score * 100).toFixed(1)}%</div></div>
+        <div class="bg-gray-50 rounded-lg p-2"><div class="text-gray-400">重要度</div><div class="font-bold text-gray-700">${d.importance_score}/10</div></div>
+        <div class="bg-gray-50 rounded-lg p-2"><div class="text-gray-400">有用</div><div class="font-bold text-green-600">${d.helpful_count}</div></div>
+        <div class="bg-gray-50 rounded-lg p-2"><div class="text-gray-400">不有用</div><div class="font-bold text-red-600">${d.unhelpful_count}</div></div>
+      </div>
+      <div class="text-xs text-gray-400">作成: ${new Date(d.created_at).toLocaleString('ja-JP')}</div>
+      <div class="chunk-content text-sm text-gray-700 bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">${esc(d.content)}</div>
+    </div>
+  `;
+}
+
 async function doSearch() {
-  const pk = document.getElementById('search-project').value;
   const q = document.getElementById('search-query').value.trim();
   const results = document.getElementById('search-results');
 
   if (!q) { results.innerHTML = '<p class="text-xs text-gray-400">キーワードを入力してください</p>'; return; }
-
   results.innerHTML = '<p class="text-xs text-gray-400">検索中...</p>';
 
-  const d = await api('/api/devin/recall', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_key: pk, query: q, top_k: 10 }),
-  });
+  let d;
+  if (searchMode === 'cross') {
+    d = await api('/api/search/cross-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q, top_k: 10 }),
+    });
+  } else {
+    const pk = document.getElementById('search-project').value;
+    d = await api('/api/devin/recall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_key: pk, query: q, top_k: 10 }),
+    });
+  }
 
   if (!d || d.results.length === 0) {
     results.innerHTML = '<p class="text-xs text-gray-400">結果なし</p>';
     return;
   }
 
-  window._searchResults = d.results;
-  results.innerHTML = d.results.map((r, i) => `
-    <div class="p-2.5 border border-gray-100 rounded-lg hover:border-indigo-200 cursor-pointer transition fade-in" onclick="showChunkDetail(window._searchResults[${i}])">
+  results.innerHTML = d.results.map(r => `
+    <div class="p-2.5 border border-gray-100 rounded-lg hover:border-indigo-200 cursor-pointer transition fade-in" onclick="loadChunkDetail(${r.chunk_id})">
       <div class="flex items-center gap-2 mb-1">
         <span class="text-xs font-mono text-gray-400">#${r.chunk_id}</span>
+        ${r.project_key ? `<span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">${esc(r.project_key)}</span>` : ''}
         <span class="text-xs text-indigo-500 font-medium">${r.score.toFixed(3)}</span>
       </div>
       <div class="text-xs text-gray-600 line-clamp-3">${esc(r.content.substring(0, 200))}</div>
-      <div class="flex gap-1 mt-1">${(r.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}</div>
+      <div class="flex gap-1 mt-1">${(r.tags || []).map(t => `<span class="tag ${tagColor(t)}" onclick="event.stopPropagation(); filterByTag('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
     </div>
   `).join('');
-}
-
-function showChunkDetail(chunk) {
-  const detail = document.getElementById('chunk-detail');
-  const body = document.getElementById('chunk-detail-body');
-  detail.classList.remove('hidden');
-  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-  body.innerHTML = `
-    <div class="space-y-3">
-      <div class="flex items-center gap-3 flex-wrap">
-        <span class="text-sm font-mono text-gray-500">Chunk #${chunk.chunk_id}</span>
-        <span class="tag bg-indigo-100 text-indigo-600">${esc(chunk.chunk_type)}</span>
-        <span class="text-xs text-gray-400">Score: ${chunk.score.toFixed(4)}</span>
-        ${(chunk.tags || []).map(t => `<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}
-      </div>
-      <div class="chunk-content text-sm text-gray-700 bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">${esc(chunk.content)}</div>
-    </div>
-  `;
 }
 
 function filterByProject(pk) {
   document.getElementById('filter-project').value = pk;
   document.getElementById('search-project').value = pk;
+  currentOffset = 0;
   loadRecent();
+  loadTags();
 }
 
 function loadAll() {
   checkHealth();
   loadStats();
   loadRecent();
+  loadTags();
 }
 
 loadAll();
