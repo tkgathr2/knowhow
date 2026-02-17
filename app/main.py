@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import bulk, dashboard, devin, feedback, health, ingest, search
+from app.routers import bulk, dashboard, devin, external, feedback, health, ingest, intelligence, search
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -30,6 +30,8 @@ app.include_router(feedback.router, prefix="/api")
 app.include_router(devin.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(bulk.router, prefix="/api")
+app.include_router(intelligence.router, prefix="/api")
+app.include_router(external.router, prefix="/api")
 
 
 @app.get("/", include_in_schema=False)
