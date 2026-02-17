@@ -146,5 +146,26 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
             confidence_score=row.confidence_score,
         )
 
+    if not results_by_id:
+        like_q = (
+            _base_chunk_query(req.project_key, min_confidence)
+            .where(KbChunk.content.ilike(f"%{req.query}%"))
+            .order_by(KbChunk.confidence_score.desc(), KbChunk.importance_score.desc())
+            .limit(req.top_k)
+        )
+        like_rows = await db.execute(like_q)
+        for row in like_rows:
+            results_by_id[row.id] = ChunkResult(
+                chunk_id=row.id,
+                content=row.content,
+                chunk_type=row.chunk_type,
+                score=float(row.confidence_score) * 0.8,
+                tags=row.tags or [],
+                source_type=row.source_type,
+                source_id=row.source_id,
+                importance_score=row.importance_score,
+                confidence_score=row.confidence_score,
+            )
+
     results = sorted(results_by_id.values(), key=lambda r: r.score, reverse=True)[: req.top_k]
     return SearchResponse(results=results, query=req.query, total=len(results))
