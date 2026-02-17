@@ -155,17 +155,17 @@ async function loadStats() {
   if (!d) return;
 
   const cards = [
-    { label: 'プロジェクト', value: d.total_projects, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>', color: 'indigo' },
-    { label: 'セッション', value: d.total_sessions, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>', color: 'blue' },
-    { label: 'チャンク', value: d.total_chunks, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>', color: 'emerald' },
-    { label: 'Embedding済', value: d.total_embedded, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>', color: 'amber' },
+    { label: 'プロジェクト', value: d.total_projects, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>', bg: 'bg-indigo-100', fg: 'text-indigo-600' },
+    { label: 'セッション', value: d.total_sessions, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>', bg: 'bg-blue-100', fg: 'text-blue-600' },
+    { label: 'チャンク', value: d.total_chunks, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>', bg: 'bg-emerald-100', fg: 'text-emerald-600' },
+    { label: 'Embedding済', value: d.total_embedded, icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>', bg: 'bg-amber-100', fg: 'text-amber-600' },
   ];
 
   document.getElementById('stats-cards').innerHTML = cards.map(c => `
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 fade-in">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 bg-${c.color}-100 rounded-lg flex items-center justify-center">
-          <svg class="w-5 h-5 text-${c.color}-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">${c.icon}</svg>
+        <div class="w-10 h-10 ${c.bg} rounded-lg flex items-center justify-center">
+          <svg class="w-5 h-5 ${c.fg}" fill="none" stroke="currentColor" viewBox="0 0 24 24">${c.icon}</svg>
         </div>
         <div>
           <div class="text-2xl font-bold text-gray-900">${c.value}</div>
@@ -288,8 +288,9 @@ async function doSearch() {
     return;
   }
 
-  results.innerHTML = d.results.map(r => `
-    <div class="p-2.5 border border-gray-100 rounded-lg hover:border-indigo-200 cursor-pointer transition fade-in" onclick="showChunkDetail(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+  window._searchResults = d.results;
+  results.innerHTML = d.results.map((r, i) => `
+    <div class="p-2.5 border border-gray-100 rounded-lg hover:border-indigo-200 cursor-pointer transition fade-in" onclick="showChunkDetail(window._searchResults[${i}])">
       <div class="flex items-center gap-2 mb-1">
         <span class="text-xs font-mono text-gray-400">#${r.chunk_id}</span>
         <span class="text-xs text-indigo-500 font-medium">${r.score.toFixed(3)}</span>
