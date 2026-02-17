@@ -1,5 +1,5 @@
 -- V6: Intelligence features (recall tracking, external sources, decay support)
-BEGIN;
+-- Idempotent: safe to run multiple times (IF NOT EXISTS everywhere)
 
 -- Add recall tracking columns to kb_chunks
 ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS last_recalled_at timestamptz;
@@ -34,5 +34,3 @@ CREATE TABLE IF NOT EXISTS kb_external_sources (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_external_sources_type_url
 ON kb_external_sources(source_type, source_url);
-
-COMMIT;
