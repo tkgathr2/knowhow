@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     kb_api_key: str = ""
     embedding_model: str = "text-embedding-3-large"
     embedding_dim: int = 1536
+    github_webhook_secret: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
