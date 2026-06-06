@@ -47,6 +47,63 @@ CHUNK_TYPE = {
 }
 SEED_AB = {"rule": (9.0, 1.0), "insight": (6.0, 2.0), "anti_pattern": (5.0, 2.0)}
 
+# 開発ログDB ステータス -> kb_sessions.status
+STATUS_MAP = {
+    "完了": "success", "success": "success",
+    "失敗": "fail", "fail": "fail",
+    "社長確認待ち": "partial", "進行中": "partial", "受付": "partial", "保留": "partial",
+}
+# 開発ログDB 実行ツール -> kb_sessions.tool（括弧前トークンで正規化）
+TOOL_MAP = {
+    "claude code": "claude_code", "claude_code": "claude_code",
+    "cowork": "cowork", "devin": "devin", "cursor": "cursor",
+    "chatgpt": "chatgpt", "手動": "manual",
+}
+# 学びDB 状態 -> is_deprecated（非推奨/凍結なら True）
+DEPRECATED_STATES = {"🔴 非推奨", "🔴非推奨", "非推奨", "❄ 凍結", "❄凍結", "凍結"}
+
+
+def _norm_token(v) -> str:
+    """select 表示値から先頭トークンを取り出す。'env_mismatch (環境差異)' -> 'env_mismatch'。"""
+    if v in (None, ""):
+        return ""
+    s = str(v)
+    for sep in (" (", "（", "("):
+        if sep in s:
+            s = s.split(sep, 1)[0]
+            break
+    return s.strip()
+
+
+def _map_tool(v) -> str:
+    if v in (None, ""):
+        return "devin"
+    key = _norm_token(v).lower()
+    return TOOL_MAP.get(key, key.replace(" ", "_") or "devin")
+
+
+def _map_status(v) -> str:
+    if v in (None, ""):
+        return "partial"
+    return STATUS_MAP.get(str(v).strip(), "partial")
+
+
+def _map_reason(failure_type) -> str:
+    """失敗類型 -> kb_issues.reason enum。enum外（thinking_mistake等）は incomplete に寄せる。"""
+    tok = _norm_token(failure_type).lower()
+    return tok if tok in REASON_ENUM else DEFAULT_REASON
+
+
+def _sev_imp(severity) -> int:
+    s = str(severity or "")
+    if "重大" in s:
+        return 8
+    if "警告" in s:
+        return 6
+    if "軽微" in s:
+        return 4
+    return 6
+
 
 async def require_admin_key(
     x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
@@ -185,14 +242,12 @@ async def _import_learning(
 
     kind = item.get("種別") or item.get("kind") or ""
     chunk_type, imp = CHUNK_TYPE.get(str(kind).strip(), ("insight", 5))
-    alpha = item.get("alpha値") or item.get("alpha")
-    beta = item.get("beta値") or item.get("beta")
-    if alpha is None or beta is None:
-        s_a, s_b = _seed_ab(chunk_type)
-        alpha = float(alpha) if alpha is not None else s_a
-        beta = float(beta) if beta is not None else s_b
-    else:
-        alpha, beta = float(alpha), float(beta)
+    # 重要(分析§7): Notion 学びの α/β は全件が初期値(1/1, 一部2/1)のままで、
+    # そのまま移送すると confidence≈0.50 で 97/98 件が閾値0.70割れ＝検索に出ない事故になる。
+    # よって種別ベースのシードで必ず上書きする（元値は meta.notion_alpha/beta に保持して非破壊）。
+    notion_alpha = item.get("alpha値") if item.get("alpha値") is not None else item.get("alpha")
+    notion_beta = item.get("beta値") if item.get("beta値") is not None else item.get("beta")
+    alpha, beta = _seed_ab(chunk_type)
     confidence = float(alpha / (alpha + beta)) if (alpha + beta) > 0 else 0.5
 
     title = item.get("タイトル") or item.get("title") or ""
@@ -213,12 +268,14 @@ async def _import_learning(
             "status": item.get("状態"),
             "source_basis": item.get("根拠"),
             "applicable_condition": item.get("適用条件"),
+            "notion_alpha": notion_alpha,
+            "notion_beta": notion_beta,
         },
         alpha=alpha,
         beta=beta,
         confidence_score=confidence,
         recall_count=int(item.get("参照回数") or 0),
-        is_deprecated=bool(item.get("is_deprecated")),
+        is_deprecated=bool(item.get("is_deprecated")) or (str(item.get("状態") or "").strip() in DEPRECATED_STATES),
     )
     if not dry_run:
         emb = await _embed(content, dry_run)
@@ -248,8 +305,8 @@ async def _import_devlog(
 
     session = KbSession(
         project_key=project_key,
-        tool=str(item.get("実行ツール") or item.get("tool") or "devin").strip().lower().replace(" ", "_"),
-        status=item.get("status") or "partial",
+        tool=_map_tool(item.get("実行ツール") or item.get("tool")),
+        status=_map_status(item.get("ステータス") or item.get("status")),
         environment=item.get("environment") or "local",
         duration_seconds=(int(item["所要時間（分）"]) * 60) if item.get("所要時間（分）") else None,
         raw_log=raw_log,
@@ -310,9 +367,9 @@ async def _import_failure(
     content = "\n\n".join(p for p in parts if p).strip() or "(empty)"
 
     failure_type = item.get("失敗類型") or item.get("failure_type")
-    reason = str(failure_type) if failure_type in REASON_ENUM else DEFAULT_REASON
+    reason = _map_reason(failure_type)  # 'env_mismatch (環境差異)' 等を括弧前で正規化。enum外は incomplete。
     severity = item.get("重大度")
-    imp = {"🔴 重大": 8, "🟡 警告": 6, "🔵 軽微": 4}.get(str(severity).strip() if severity else "", 6)
+    imp = _sev_imp(severity)
 
     is_done = bool(item.get("対策完了"))
     a, b = SEED_AB["anti_pattern"]
