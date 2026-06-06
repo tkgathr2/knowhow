@@ -1,0 +1,30 @@
+name: ingest-knowledge
+# Phase C: 毎日ネットから新しい知識（各スタックのリリースノート＝新定石）を取り込む。
+# 夜間ハートビート(02:00 JST)の前=01:00 JSTに走らせ、当日分を採点対象に乗せる。
+on:
+  schedule:
+    - cron: '0 16 * * *'    # 01:00 JST (= 16:00 UTC) 毎日
+  workflow_dispatch: {}      # 手動実行も可
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ingest GitHub releases (curated stacks)
+        env:
+          KB_API_KEY: ${{ secrets.KB_API_KEY }}
+        run: |
+          BASE=https://knowhow.up.railway.app
+          # 高木産業が使うスタックの公式リポ（守破離パーツスカウト/recall が拾える）
+          REPOS="tiangolo/fastapi vercel/next.js prisma/prisma facebook/react pgvector/pgvector sqlalchemy/sqlalchemy openai/openai-python mastra-ai/mastra"
+          AUTH=()
+          if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
+          for r in $REPOS; do
+            echo "== ingest releases: $r =="
+            curl -fsS --max-time 60 -X POST "$BASE/api/external/github-releases" \
+              -H 'Content-Type: application/json' "${AUTH[@]}" \
+              -d "{\"repo\":\"$r\",\"project_key\":\"cto-lab\",\"max_releases\":3}" \
+              || echo "  (skip failed repo: $r)"   # 1リポ失敗で全体を止めない（部分成功）
+            echo
+            sleep 3   # GitHub レート制限に優しく
+          done
+          echo "daily knowledge ingest done."
