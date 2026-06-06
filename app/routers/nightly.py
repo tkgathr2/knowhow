@@ -158,10 +158,10 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
 
     processed: list[NightlyDigest] = []
     try:
+        today = datetime.now(UTC).date()
         if req.run_date is not None:
             targets = [req.run_date]
         else:
-            today = datetime.now(UTC).date()
             targets = await _dates_to_process(db, today, req.catchup_days)
 
         if not targets:
@@ -170,15 +170,18 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
                 message="処理対象なし（本日分は完了済み）",
             )
 
-        # decay は「現在状態」操作。catch-up で複数日を処理しても多重減衰しないよう1回だけ実行し、
-        # 最新日(latest)の digest に計上する（過去の遡り分は decayed=0）。
+        # decay は「現在状態」操作＝1日1回だけ。**今日分を処理するときのみ**実行し、過去日の遡り
+        # (backfill) では実行しない。冪等性：今日が done になれば以降の catch-up 対象から外れるため、
+        # 同日に何度呼んでも decay は二重適用されない（手動再実行・cronリトライ安全）。
         cutoff = datetime.now(UTC) - timedelta(days=req.days_threshold)
-        latest = targets[-1]
-        decayed_total = await _decay(db, cutoff, req.decay_factor, req.min_confidence, req.dry_run)
+        do_decay = today in targets
+        decayed_total = (
+            await _decay(db, cutoff, req.decay_factor, req.min_confidence, req.dry_run) if do_decay else 0
+        )
 
         for rd in targets:
             day_start, _ = _day_bounds(rd)
-            decayed = decayed_total if rd == latest else 0
+            decayed = decayed_total if rd == today else 0
 
             if not req.dry_run:
                 await db.execute(
