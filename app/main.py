@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import bulk, dashboard, devin, external, feedback, health, ingest, intelligence, search, webhook
+from app.routers import bulk, dashboard, devin, external, feedback, health, ingest, intelligence, nightly, search, webhook
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _logger = logging.getLogger(__name__)
@@ -74,6 +74,7 @@ app.include_router(dashboard.router, prefix="/api")
 app.include_router(bulk.router, prefix="/api")
 app.include_router(intelligence.router, prefix="/api")
 app.include_router(external.router, prefix="/api")
+app.include_router(nightly.router, prefix="/api")
 app.include_router(webhook.router, prefix="/api")
 
 

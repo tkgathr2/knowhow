@@ -42,3 +42,23 @@ DATABASE_URL=postgresql://... python scripts/apply_schema.py
 - `GET /health` - ヘルスチェック
 - `POST /api/ingest` - セッションログ投入
 - `POST /api/search` - ナレッジ検索
+
+## 自己成長エンジン Phase A（夜間ハートビート）
+
+育つAI v5 の最小核。毎晩1パスで decay→再発検知→朝サマリを回す（追加のみ・後方互換）。
+
+- `POST /api/nightly/run` … 冪等（run_date主キー）＋advisory lock＋catch-up（未完了の過去N日を遡って処理）。
+  - decay（古く未想起chunkの信頼度減衰）／**北極星=再発した既知ミス件数**／採点燃料(recallログ件数) を集計し `kb_nightly_run.digest` に保存。
+  - 動作確認: `{"dry_run": true}` で書き込みなし集計のみ。
+- `GET /api/nightly/latest` … 直近の朝サマリ（digest）を取得。
+- マイグレーション: `db/v7_self_growth.sql`（起動時に自動適用）。
+
+### Railway cron 設定（ダッシュボード操作・別途）
+毎晩02:00 JST（=17:00 UTC）に叩く想定。Railwayの Cron は「前回実行中なら次回をスキップ」する仕様のため、
+catch-up（過去N日の未完了を遡る）を内蔵してある。さらに **healthchecks.io 等のDead-man's switch**で
+「走らなかった夜」を検知する運用を推奨。
+```
+# 例: Railway cron schedule
+0 17 * * *   ->   curl -fsS -X POST https://knowhow.up.railway.app/api/nightly/run -H 'Content-Type: application/json' -d '{}'
+```
+> 注: 認証(PR#23/KB_API_KEY)が有効化されたら `-H "X-API-Key: $KB_API_KEY"` を付与し、nightlyルータも保護対象に含めること。
