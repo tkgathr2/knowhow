@@ -413,3 +413,109 @@ async def ingest_audit(
         skipped=skipped,
         message=f"{req.audit_type}: {ingested}件取り込み、{skipped}件スキップ",
     )
+
+
+# ============================================================================
+# Phase C: 毎日ネットから新しい知識を取り込む（自己成長の本丸）
+# GitHub Releases = 各スタックの「新しい定石・変更点」の高信頼ソース。
+# 出典URL・公開日を provenance として meta に保持し、verified=true（フィード由来）。
+# 追加のみ・後方互換・PII非取込（公開リリースノートのみ）。
+# ============================================================================
+
+
+class GithubReleasesRequest(BaseModel):
+    repo: str  # "owner/name"
+    project_key: str = "cto-lab"  # 既定は全社共通（守破離/recall が拾える）
+    max_releases: int = Field(default=5, ge=1, le=30)
+    include_prerelease: bool = False
+
+
+@router.post("/external/github-releases", response_model=IngestResult)
+async def ingest_github_releases(
+    req: GithubReleasesRequest, db: AsyncSession = Depends(get_db)
+) -> IngestResult:
+    """指定リポの最新リリースノートを external chunk として取り込む（出典付き・verified）。"""
+    await _ensure_project(db, req.project_key)
+
+    src_row = await db.execute(
+        select(KbExternalSource).where(
+            KbExternalSource.source_type == "github_releases",
+            KbExternalSource.source_url == req.repo,
+        )
+    )
+    src = src_row.scalar_one_or_none()
+    if not src:
+        src = KbExternalSource(
+            source_type="github_releases",
+            source_url=req.repo,
+            project_key=req.project_key,
+        )
+        db.add(src)
+        await db.flush()
+
+    url = f"https://api.github.com/repos/{req.repo}/releases"
+    params = {"per_page": str(req.max_releases)}
+    headers = {"Accept": "application/vnd.github+json"}
+
+    async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
+        resp = await client.get(url, params=params, headers=headers)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"GitHub API error: {resp.status_code} {resp.text[:200]}",
+            )
+        releases = resp.json()
+
+    ingested = 0
+    skipped = 0
+    repo_name = req.repo.split("/")[-1]
+
+    for rel in releases:
+        if rel.get("draft"):
+            skipped += 1
+            continue
+        if rel.get("prerelease") and not req.include_prerelease:
+            skipped += 1
+            continue
+
+        tag = rel.get("tag_name", "")
+        name = rel.get("name") or tag
+        body = (rel.get("body") or "")[:3000]
+        if not tag and not body:
+            skipped += 1
+            continue
+
+        published = rel.get("published_at") or rel.get("created_at") or ""
+        html_url = rel.get("html_url", "")
+        content = (
+            f"[GitHub Release {req.repo} {tag}] {name}\n"
+            f"公開日: {published}\n出典: {html_url}\n\n{body}"
+        )
+        tags = ["external", "github-release", repo_name]
+        meta = {
+            "source": "github_release",
+            "repo": req.repo,
+            "tag": tag,
+            "url": html_url,
+            "provenance": html_url,
+            "published_at": published,
+            "verified": True,  # フィード由来＝出典確定
+        }
+
+        chunk = await _store_external_chunk(
+            db, req.project_key, content, "release_note", tags, meta, src.id
+        )
+        if chunk:
+            ingested += 1
+        else:
+            skipped += 1
+
+    src.last_synced_at = datetime.now(UTC)
+    src.sync_count += 1
+    await db.commit()
+
+    return IngestResult(
+        ingested=ingested,
+        skipped=skipped,
+        message=f"{req.repo}: リリース{ingested}件取り込み、{skipped}件スキップ",
+    )
