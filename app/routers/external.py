@@ -457,7 +457,8 @@ async def ingest_github_releases(
     params = {"per_page": str(req.max_releases)}
     headers = {"Accept": "application/vnd.github+json"}
 
-    async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT) as client:
+    # follow_redirects: 移転リポ（例 tiangolo/fastapi → fastapi/fastapi）の 301 を追従する
+    async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT, follow_redirects=True) as client:
         resp = await client.get(url, params=params, headers=headers)
         if resp.status_code != 200:
             raise HTTPException(

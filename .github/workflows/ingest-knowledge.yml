@@ -15,7 +15,7 @@ jobs:
         run: |
           BASE=https://knowhow.up.railway.app
           # 高木産業が使うスタックの公式リポ（守破離パーツスカウト/recall が拾える）
-          REPOS="tiangolo/fastapi vercel/next.js prisma/prisma facebook/react pgvector/pgvector sqlalchemy/sqlalchemy openai/openai-python mastra-ai/mastra"
+          REPOS="fastapi/fastapi vercel/next.js prisma/prisma facebook/react pgvector/pgvector sqlalchemy/sqlalchemy openai/openai-python mastra-ai/mastra"
           AUTH=()
           if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
           for r in $REPOS; do
