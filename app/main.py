@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import require_api_key
-from app.routers import bulk, dashboard, devin, external, feedback, health, ingest, intelligence, nightly, search, webhook
+from app.routers import admin, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, nightly, search, webhook
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _logger = logging.getLogger(__name__)
@@ -83,6 +83,10 @@ app.include_router(nightly.router, prefix="/api", dependencies=_protected)
 
 # Webhook は API キーではなく GitHub HMAC 署名（X-Hub-Signature-256）で検証するため対象外
 app.include_router(webhook.router, prefix="/api")
+
+# HO-83 移行用 管理import。X-Admin-Key（ADMIN_IMPORT_KEY）で別系統認証するため _protected は付けない。
+# ADMIN_IMPORT_KEY 未設定なら /api/admin/* は 503（誤って全開放しない安全側）。
+app.include_router(admin.router, prefix="/api")
 
 
 @app.get("/", include_in_schema=False)
