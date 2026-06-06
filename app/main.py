@@ -2,11 +2,12 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.auth import require_api_key
 from app.routers import bulk, dashboard, devin, external, feedback, health, ingest, intelligence, search, webhook
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -65,15 +66,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 認証なしで開放: ヘルスチェックのみ
 app.include_router(health.router)
-app.include_router(ingest.router, prefix="/api")
-app.include_router(search.router, prefix="/api")
-app.include_router(feedback.router, prefix="/api")
-app.include_router(devin.router, prefix="/api")
-app.include_router(dashboard.router, prefix="/api")
-app.include_router(bulk.router, prefix="/api")
-app.include_router(intelligence.router, prefix="/api")
-app.include_router(external.router, prefix="/api")
+
+# API キー保護対象（KB_API_KEY 設定時のみ有効。未設定なら従来通り開放）
+_protected = [Depends(require_api_key)]
+app.include_router(ingest.router, prefix="/api", dependencies=_protected)
+app.include_router(search.router, prefix="/api", dependencies=_protected)
+app.include_router(feedback.router, prefix="/api", dependencies=_protected)
+app.include_router(devin.router, prefix="/api", dependencies=_protected)
+app.include_router(dashboard.router, prefix="/api", dependencies=_protected)
+app.include_router(bulk.router, prefix="/api", dependencies=_protected)
+app.include_router(intelligence.router, prefix="/api", dependencies=_protected)
+app.include_router(external.router, prefix="/api", dependencies=_protected)
+
+# Webhook は API キーではなく GitHub HMAC 署名（X-Hub-Signature-256）で検証するため対象外
 app.include_router(webhook.router, prefix="/api")
 
 
