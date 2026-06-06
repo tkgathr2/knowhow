@@ -14,6 +14,44 @@ from app.models import KbChunk, KbProject, KbRecallLog, KbSession
 router = APIRouter(tags=["devin"])
 
 
+# Phase B: recall を RRF(Reciprocal Rank Fusion) ハイブリッドに引き上げる。
+# ベクトル(cosine)と全文(ts_rank_cd)を両方走らせ 1/(k+rank) で融合（k=60 定番）。
+def _recall_vec_literal(emb: list[float]) -> str:
+    return "[" + ",".join(repr(float(x)) for x in emb) + "]"
+
+
+_RECALL_RRF_SQL = text(
+    """
+    WITH vector_search AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> CAST(:emb AS vector)) AS rank
+        FROM kb_chunks
+        WHERE project_key = :pk AND is_deprecated = false
+          AND confidence_score >= :min_conf AND embedding IS NOT NULL
+        ORDER BY embedding <=> CAST(:emb AS vector)
+        LIMIT :n_each
+    ),
+    fulltext_search AS (
+        SELECT id, ROW_NUMBER() OVER (
+            ORDER BY ts_rank_cd(search_vector, plainto_tsquery('simple', :q)) DESC
+        ) AS rank
+        FROM kb_chunks
+        WHERE project_key = :pk AND is_deprecated = false AND confidence_score >= :min_conf
+          AND search_vector @@ plainto_tsquery('simple', :q)
+        ORDER BY ts_rank_cd(search_vector, plainto_tsquery('simple', :q)) DESC
+        LIMIT :n_each
+    )
+    SELECT c.id, c.content, c.chunk_type, c.tags,
+           COALESCE(1.0/(:k + v.rank), 0.0) + COALESCE(1.0/(:k + f.rank), 0.0) AS rrf_score
+    FROM kb_chunks c
+    LEFT JOIN vector_search   v ON v.id = c.id
+    LEFT JOIN fulltext_search f ON f.id = c.id
+    WHERE v.id IS NOT NULL OR f.id IS NOT NULL
+    ORDER BY rrf_score DESC
+    LIMIT :n_final
+    """
+)
+
+
 class RecallRequest(BaseModel):
     project_key: str
     query: str
@@ -65,7 +103,31 @@ async def recall(
         KbChunk.confidence_score >= min_confidence,
     ]
 
+    # Phase B: まず RRF ハイブリッドで取得。例外/0件なら下の既存（ベクトル→全文→ILIKE）へ
+    # 完全フォールバック＝今日より劣化しない。応答スキーマ・recall記録は不変。
+    rrf_done = False
     if query_embedding is not None:
+        try:
+            _n_each = min(max(top_k * 2, 20), 100)
+            _rrf_rows = await db.execute(
+                _RECALL_RRF_SQL,
+                {
+                    "pk": req.project_key, "q": req.query, "min_conf": min_confidence,
+                    "emb": _recall_vec_literal(query_embedding),
+                    "n_each": _n_each, "n_final": top_k, "k": 60,
+                },
+            )
+            for _r in _rrf_rows:
+                results_by_id[_r.id] = RecallChunk(
+                    chunk_id=_r.id, content=_r.content, chunk_type=_r.chunk_type,
+                    score=float(_r.rrf_score), tags=_r.tags or [],
+                )
+            rrf_done = bool(results_by_id)
+        except Exception:
+            results_by_id = {}
+            rrf_done = False
+
+    if not rrf_done and query_embedding is not None:
         similarity = (
             1 - KbChunk.embedding.cosine_distance(query_embedding)
         ).label("similarity")
@@ -112,17 +174,18 @@ async def recall(
         .limit(top_k)
     )
 
-    fts_rows = await db.execute(fts_q)
-    for row in fts_rows:
-        if row.id in results_by_id:
-            continue
-        results_by_id[row.id] = RecallChunk(
-            chunk_id=row.id,
-            content=row.content,
-            chunk_type=row.chunk_type,
-            score=float(row.confidence_score),
-            tags=row.tags or [],
-        )
+    if not rrf_done:
+        fts_rows = await db.execute(fts_q)
+        for row in fts_rows:
+            if row.id in results_by_id:
+                continue
+            results_by_id[row.id] = RecallChunk(
+                chunk_id=row.id,
+                content=row.content,
+                chunk_type=row.chunk_type,
+                score=float(row.confidence_score),
+                tags=row.tags or [],
+            )
 
     if not results_by_id:
         escaped = escape_like(req.query)
