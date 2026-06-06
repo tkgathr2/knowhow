@@ -47,6 +47,8 @@ class NightlyDigest(BaseModel):
     recurrence_count: int  # 北極星
     scored_count: int
     fail_session_count: int
+    knowledge_gap_count: int = 0  # recall 0件＝知識が無かった回数（次に学ぶべきこと）
+    suggestions: list[str] = []   # 提案バジェット（最大3件・ほとんどの日は0が正常）
     note: str
 
 
@@ -132,6 +134,31 @@ async def _scored_count(db: AsyncSession, day_start: datetime) -> int:
     return int(row.scalar() or 0)
 
 
+async def _knowledge_gaps(db: AsyncSession, day_start: datetime) -> tuple[int, list[str]]:
+    """メタ認知(planning): その日の recall で result_count=0 だったクエリ＝知識が無かった所。
+    「次に何を学ぶ/取り込むべきか」の一次情報。戻り値: (0件recall総数, 頻出クエリ上位)。"""
+    _, day_end = _day_bounds(day_start.date())
+    params = {"ds": day_start, "de": day_end}
+    total = await db.execute(
+        text(
+            "SELECT count(*) FROM kb_recall_log "
+            "WHERE created_at >= :ds AND created_at < :de AND result_count = 0"
+        ),
+        params,
+    )
+    gap_count = int(total.scalar() or 0)
+    samples_rows = await db.execute(
+        text(
+            "SELECT query, count(*) AS c FROM kb_recall_log "
+            "WHERE created_at >= :ds AND created_at < :de AND result_count = 0 "
+            "GROUP BY query ORDER BY c DESC LIMIT 5"
+        ),
+        params,
+    )
+    samples = [row.query for row in samples_rows]
+    return gap_count, samples
+
+
 async def _dates_to_process(db: AsyncSession, today: date, catchup_days: int) -> list[date]:
     """過去 catchup_days 日（今日含む）で status='done' でない日を、古い順に返す。"""
     start = today - timedelta(days=catchup_days - 1)
@@ -195,9 +222,24 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
 
             recurrence, fail_total = await _recurrence_count(db, day_start, req.recurrence_window_days)
             scored = await _scored_count(db, day_start)
+            gap_count, gap_samples = await _knowledge_gaps(db, day_start)
+
+            # 提案バジェット（最大3件・ほとんどの日は0が正常）。気づき→報連相の核。
+            suggestions: list[str] = []
+            if recurrence > 0:
+                suggestions.append(
+                    f"再発した既知ミス {recurrence}件 → 対策の強化・再発防止を検討（北極星が悪化）"
+                )
+            if gap_count > 0:
+                ex = ("（例: " + " / ".join(gap_samples[:2]) + "）") if gap_samples else ""
+                suggestions.append(
+                    f"知識ギャップ {gap_count}件（recall 0件）→ 取込/学び追加を検討{ex}"
+                )
+            suggestions = suggestions[:3]
 
             note = (
-                f"decay {decayed}件 / 再発(北極星) {recurrence}件 / fail {fail_total}件 / 採点 {scored}件"
+                f"decay {decayed}件 / 再発(北極星) {recurrence}件 / fail {fail_total}件 / "
+                f"採点 {scored}件 / 知識ギャップ {gap_count}件 / 提案 {len(suggestions)}件"
                 + ("（dry-run）" if req.dry_run else "")
             )
             digest_obj = {
@@ -206,6 +248,9 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
                 "recurrence_count": recurrence,
                 "fail_session_count": fail_total,
                 "scored_count": scored,
+                "knowledge_gap_count": gap_count,
+                "knowledge_gap_samples": gap_samples,
+                "suggestions": suggestions,
                 "north_star": "recurrence_count（再発した既知ミス件数・低いほど良い）",
                 "note": note,
                 "generated_at": datetime.now(UTC).isoformat(),
@@ -236,6 +281,8 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
                     recurrence_count=recurrence,
                     scored_count=scored,
                     fail_session_count=fail_total,
+                    knowledge_gap_count=gap_count,
+                    suggestions=suggestions,
                     note=note,
                 )
             )
@@ -272,13 +319,18 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
     if not r:
         raise HTTPException(status_code=404, detail="No completed nightly run yet")
     note = ""
+    gap_count = 0
+    suggestions: list[str] = []
     try:
         d = r.digest
         if isinstance(d, str):
             d = json.loads(d)
-        note = (d or {}).get("note", "")
+        d = d or {}
+        note = d.get("note", "")
+        gap_count = int(d.get("knowledge_gap_count", 0) or 0)
+        suggestions = list(d.get("suggestions", []) or [])
     except Exception:
-        note = ""
+        pass
     return NightlyDigest(
         run_date=r.run_date.isoformat(),
         status=r.status,
@@ -286,5 +338,7 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
         recurrence_count=r.recurrence_count,
         scored_count=r.scored_count,
         fail_session_count=r.fail_session_count,
+        knowledge_gap_count=gap_count,
+        suggestions=suggestions,
         note=note,
     )
