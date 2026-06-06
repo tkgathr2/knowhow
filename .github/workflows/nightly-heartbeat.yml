@@ -1,0 +1,25 @@
+name: nightly-heartbeat
+# 自己成長エンジン Phase A の夜間ハートビートを毎晩トリガーする。
+# Railwayのcronは「Webサービス再起動」型で常駐APIには不向きなため、外部スケジューラ
+# （GitHub Actions）から HTTP で叩く方式を採用（SREパネル提案）。
+on:
+  schedule:
+    - cron: '0 17 * * *'   # 02:00 JST (= 17:00 UTC) 毎日
+  workflow_dispatch: {}     # 手動実行も可
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger knowhow nightly run
+        env:
+          KB_API_KEY: ${{ secrets.KB_API_KEY }}
+        run: |
+          # KB_API_KEY シークレットが設定されていればヘッダを付与（認証有効化後に対応）。
+          AUTH=()
+          if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
+          curl -fsS --max-time 120 -X POST \
+            https://knowhow.up.railway.app/api/nightly/run \
+            -H 'Content-Type: application/json' \
+            "${AUTH[@]}" \
+            -d '{}'
+          echo "\nnightly heartbeat triggered."
