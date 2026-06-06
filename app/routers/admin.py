@@ -159,9 +159,11 @@ async def _chunk_meta_exists(db: AsyncSession, key: str, value: str) -> bool:
     return row.first() is not None
 
 
-async def _session_meta_exists(db: AsyncSession, key: str, value: str) -> bool:
+async def _session_hash_exists(db: AsyncSession, project_key: str, log_hash: str) -> bool:
+    # kb_sessions に meta 列は無い。冪等は UNIQUE(project_key, hash) を使う。
     row = await db.execute(
-        text("SELECT 1 FROM kb_sessions WHERE meta->>:k = :v LIMIT 1").bindparams(k=key, v=value)
+        text("SELECT 1 FROM kb_sessions WHERE project_key = :p AND hash = :h LIMIT 1")
+        .bindparams(p=project_key, h=log_hash)
     )
     return row.first() is not None
 
@@ -294,14 +296,13 @@ async def _import_devlog(
     db: AsyncSession, project_key: str, item: dict, dry_run: bool
 ) -> ImportResultItem:
     notion_id = item.get("notion_log_id") or item.get("依頼ID") or item.get("id")
-    if notion_id and await _session_meta_exists(db, "notion_log_id", str(notion_id)):
-        return ImportResultItem(index=0, status="skipped", detail="duplicate notion_log_id")
-
     request = item.get("依頼内容") or item.get("request") or ""
     result = item.get("結果サマリ") or item.get("result_summary") or ""
     learning = item.get("学び") or item.get("learning") or ""
     raw_log = "\n\n".join(p for p in [request, result, learning] if p).strip() or "(empty)"
     log_hash = hashlib.sha256(f"{request}{notion_id or ''}".encode("utf-8")).hexdigest()
+    if await _session_hash_exists(db, project_key, log_hash):
+        return ImportResultItem(index=0, status="skipped", detail="duplicate session hash")
 
     session = KbSession(
         project_key=project_key,
@@ -317,8 +318,8 @@ async def _import_devlog(
         retry_count=int(item.get("リトライ回数") or 0),
         ingest_state="summarized",
         hash=log_hash,
-        meta={"notion_log_id": str(notion_id) if notion_id is not None else None,
-              "feedback_helpful": item.get("フィードバック有用度")},
+        summary_json={"notion_log_id": str(notion_id) if notion_id is not None else None,
+                      "feedback_helpful": item.get("フィードバック有用度")},
     )
     if dry_run:
         return ImportResultItem(index=0, status="imported")
