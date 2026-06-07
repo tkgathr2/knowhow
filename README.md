@@ -61,4 +61,4 @@ catch-up（過去N日の未完了を遡る）を内蔵してある。さらに *
 # 例: Railway cron schedule
 0 17 * * *   ->   curl -fsS -X POST https://knowhow.up.railway.app/api/nightly/run -H 'Content-Type: application/json' -d '{}'
 ```
-> 注: 認証(PR#23/KB_API_KEY)が有効化されたら `-H "X-API-Key: $KB_API_KEY"` を付与し、nightlyルータも保護対象に含めること。
+> 注: write系（/api/nightly/run 等）は KB_API_KEY 設定後に `-H "X-API-Key: $KB_API_KEY"` が必須。read系（/api/stats, /recent, /tags, /chunks, /search, /search/hybrid, /api/devin/recall 等）は KB_API_KEY 未設定でも引き続き開放。GitHub Actions ワークフローは `AUTH=(); if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi` の条件付きパターンを使用（KB_API_KEY 未設定時はヘッダなしで動作する）。
