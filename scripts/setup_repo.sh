@@ -41,7 +41,10 @@ https://knowhow.up.railway.app
 タスクに取り掛かる前に、関連する過去の知見を検索してください。
 
 ```bash
+# read系（recall）は認証なしで動く。write系（memorize/feedback等）は KB_API_KEY 設定後に X-API-Key ヘッダが必須。
+AUTH=(); if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
 curl -s -X POST https://knowhow.up.railway.app/api/devin/recall \
+  "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d '{"project_key":"__REPO_NAME__","query":"<タスクの要約>","top_k":5}'
 ```
@@ -52,7 +55,10 @@ curl -s -X POST https://knowhow.up.railway.app/api/devin/recall \
 タスク完了後、学んだことを記録してください。
 
 ```bash
+# write系（memorize）は KB_API_KEY 設定後に X-API-Key ヘッダが必須。read系は設定なしでも動く。
+AUTH=(); if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
 curl -s -X POST https://knowhow.up.railway.app/api/devin/memorize \
+  "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d '{"project_key":"__REPO_NAME__","tool":"devin","status":"success","environment":"local","raw_log":"<セッションで学んだこと・解決した問題・重要な決定事項の要約>","tags":["<関連タグ>"]}'
 ```
@@ -61,7 +67,10 @@ curl -s -X POST https://knowhow.up.railway.app/api/devin/memorize \
 検索結果を使って問題が解決した場合、フィードバックを送信してください。
 
 ```bash
+# write系（feedback）は KB_API_KEY 設定後に X-API-Key ヘッダが必須。read系は設定なしでも動く。
+AUTH=(); if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
 curl -s -X POST https://knowhow.up.railway.app/api/feedback \
+  "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d '{"project_key":"__REPO_NAME__","session_id":<session_id>,"query":"<検索クエリ>","returned_chunk_ids":[<chunk_ids>],"selected_chunk_ids":[<使ったchunk_ids>],"resolved":true,"was_helpful":"helpful"}'
 ```

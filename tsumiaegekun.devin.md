@@ -7,9 +7,15 @@
 タスクの内容を要約し、関連する過去の知見を検索する。
 
 ```bash
+# read系（recall）は KB_API_KEY 未設定でも動く。write系（memorize/feedback等）は KB_API_KEY 設定後に -H "X-API-Key: $KB_API_KEY" が必須。
 curl -s -X POST https://knowhow.up.railway.app/api/devin/recall \
   -H 'Content-Type: application/json' \
   -d '{"project_key":"<リポジトリ名>","query":"<タスクの要約>","top_k":5}'
+# KB_API_KEY が設定済みの場合は以下を使用:
+#   curl -s -X POST https://knowhow.up.railway.app/api/devin/recall \
+#     -H "X-API-Key: $KB_API_KEY" \
+#     -H 'Content-Type: application/json' \
+#     -d '{"project_key":"<リポジトリ名>","query":"<タスクの要約>","top_k":5}'
 ```
 
 結果があれば、その知見を参考にしてタスクを進める。
@@ -21,7 +27,9 @@ curl -s -X POST https://knowhow.up.railway.app/api/devin/recall \
 タスク完了後、学んだことを記録する。
 
 ```bash
+# write系（memorize）は KB_API_KEY 設定後に X-API-Key ヘッダが必須。KB_API_KEY 未設定時はヘッダなしで試みる（認証有効化前は開放）。
 curl -s -X POST https://knowhow.up.railway.app/api/devin/memorize \
+  -H "X-API-Key: $KB_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "project_key": "<リポジトリ名>",
@@ -37,7 +45,9 @@ curl -s -X POST https://knowhow.up.railway.app/api/devin/memorize \
 recall で取得した知見が役に立った場合、フィードバックを送信する。
 
 ```bash
+# write系（feedback）は KB_API_KEY 設定後に X-API-Key ヘッダが必須。KB_API_KEY 未設定時はヘッダなしで試みる（認証有効化前は開放）。
 curl -s -X POST https://knowhow.up.railway.app/api/feedback \
+  -H "X-API-Key: $KB_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "project_key": "<リポジトリ名>",
