@@ -69,13 +69,20 @@ app.add_middleware(
 # 認証なしで開放: ヘルスチェックのみ
 app.include_router(health.router)
 
-# API キー保護対象（KB_API_KEY 設定時のみ有効。未設定なら従来通り開放）
+# HO-83: read系=開放 / write系=保護（KB_API_KEY 設定時のみ X-API-Key 必須）。
+# KB_API_KEY 未設定の間は require_api_key が素通り＝全EP開放のまま＝挙動不変。
+# 設定後は write系のみ保護。read系（ダッシュボード/検索/recall）はブラウザから鍵なしで
+# 叩かれる＆ナレッジは機密性が低いため開放を維持（ブラウザJSに鍵を埋めない方針）。
 _protected = [Depends(require_api_key)]
+
+# --- 読み取り系：開放 ---
+app.include_router(dashboard.router, prefix="/api")  # /stats /recent /tags /chunks/{id} /search/cross-project
+app.include_router(search.router, prefix="/api")     # /search /search/hybrid
+app.include_router(devin.router, prefix="/api")      # /devin/recall=開放, /devin/memorize=EP単位で保護
+
+# --- 書き込み・バッチ・外部取込系：保護 ---
 app.include_router(ingest.router, prefix="/api", dependencies=_protected)
-app.include_router(search.router, prefix="/api", dependencies=_protected)
 app.include_router(feedback.router, prefix="/api", dependencies=_protected)
-app.include_router(devin.router, prefix="/api", dependencies=_protected)
-app.include_router(dashboard.router, prefix="/api", dependencies=_protected)
 app.include_router(bulk.router, prefix="/api", dependencies=_protected)
 app.include_router(intelligence.router, prefix="/api", dependencies=_protected)
 app.include_router(external.router, prefix="/api", dependencies=_protected)
