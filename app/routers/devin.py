@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
 from app.embedding import clamp_top_k, create_embedding, escape_like
@@ -264,7 +265,7 @@ class MemorizeResponse(BaseModel):
     message: str
 
 
-@router.post("/devin/memorize", response_model=MemorizeResponse)
+@router.post("/devin/memorize", response_model=MemorizeResponse, dependencies=[Depends(require_api_key)])
 async def memorize(
     req: MemorizeRequest, db: AsyncSession = Depends(get_db)
 ) -> MemorizeResponse:
