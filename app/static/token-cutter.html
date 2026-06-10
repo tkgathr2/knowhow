@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノウハウキング君 — コストカッターくん実績</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .seg { padding: 5px 14px; font-size: 0.8rem; font-weight: 500; border-radius: 8px; cursor: pointer; transition: all 0.15s; background: #f3f4f6; color: #6b7280; }
+  .seg.active { background: #4f46e5; color: white; }
+  .seg:not(.active):hover { background: #e5e7eb; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9M18 7l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>
+      </div>
+      <h1 class="text-lg font-bold text-gray-900">コストカッターくん実績</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">ノウハウキング君</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/growth" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">成長</a>
+      <a href="/" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">一覧</a>
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+  <div class="bg-indigo-50 border border-indigo-100 rounded-xl px-5 py-3 text-indigo-900 text-sm">
+    重い手（大型ファイルの全文Read・広域Grep）を着手前に検知し、軽い手へ置き換えて節約した実績です。数字は「検知して助言した回数」と、その時に避けられた<b>推定</b>トークン（実際に従ったかは問わない上限見積り）。
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="text-xs text-gray-400 mr-1">期間</span>
+    <span id="d-7" class="seg" onclick="setDays(7)">7日</span>
+    <span id="d-30" class="seg active" onclick="setDays(30)">30日</span>
+    <span id="d-90" class="seg" onclick="setDays(90)">90日</span>
+    <span id="since" class="text-xs text-gray-400 ml-2"></span>
+  </div>
+
+  <div id="cards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">日次の検知回数と推定削減トークン</h2>
+    <p class="text-xs text-gray-400 mb-3">棒=検知回数 / 折線=推定削減トークン</p>
+    <div style="position:relative;height:240px;"><canvas id="daily" role="img" aria-label="日次の検知回数と推定削減トークン"></canvas></div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+      <h2 class="font-semibold text-sm text-gray-700 mb-3">理由別</h2>
+      <div id="byReason" class="space-y-2"></div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+      <h2 class="font-semibold text-sm text-gray-700 mb-3">PC別</h2>
+      <div id="byPc" class="space-y-2"></div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+      <h2 class="font-semibold text-sm text-gray-700 mb-3">ツール別</h2>
+      <div id="byTool" class="space-y-2"></div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+    <h2 class="font-semibold text-sm text-gray-700 mb-3">最近の検知</h2>
+    <div id="recent" class="divide-y divide-gray-50 text-sm"></div>
+  </div>
+</div>
+
+<footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">ノウハウキング君 — コストカッターくん実績</footer>
+
+<script>
+const API = window.location.origin;
+let days = 30, chart;
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function fmt(n){return Number(n||0).toLocaleString('ja-JP');}
+function hum(n){n=Number(n||0);if(n>=1e6)return (n/1e6).toFixed(1)+'M';if(n>=1e3)return (n/1e3).toFixed(1)+'k';return ''+n;}
+async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
+function setDays(n){days=n;[7,30,90].forEach(k=>document.getElementById('d-'+k).classList.toggle('active',k===n));load();}
+
+const REASON_JA={large_read:'大型ファイル全文Read',broad_grep:'広域Grep',other:'その他'};
+
+function card(label,value,sub){
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 fade-in">
+    <div class="text-xs text-gray-500">${esc(label)}</div>
+    <div class="text-2xl font-bold text-gray-900 mt-0.5">${value}</div>
+    <div class="text-xs text-gray-400 mt-0.5">${sub||''}</div></div>`;
+}
+
+function bars(rows, max, labelMap, color){
+  if(!rows.length)return '<p class="text-xs text-gray-400">データなし</p>';
+  return rows.map(r=>{
+    const name=labelMap?(labelMap[r.name]||r.name):r.name;
+    return `<div class="flex items-center gap-2">
+      <span class="w-28 text-xs text-gray-600 truncate" title="${esc(name)}">${esc(name)}</span>
+      <span class="flex-1 h-3.5 bg-gray-100 rounded overflow-hidden"><span style="display:block;height:100%;width:${Math.round(r.count/max*100)}%;background:${color};border-radius:4px;"></span></span>
+      <span class="w-10 text-right text-xs font-semibold text-gray-700">${fmt(r.count)}</span></div>`;
+  }).join('');
+}
+
+function renderDaily(d){
+  const labels=[...d.daily].reverse().map(p=>p.date.slice(5));
+  const ev=[...d.daily].reverse().map(p=>p.events);
+  const tk=[...d.daily].reverse().map(p=>p.est_tokens);
+  if(chart)chart.destroy();
+  chart=new Chart(document.getElementById('daily'),{
+    data:{labels,datasets:[
+      {type:'bar',label:'検知回数',data:ev,backgroundColor:'#9FA8F5',borderColor:'#4f46e5',borderWidth:1,yAxisID:'y',order:2},
+      {type:'line',label:'推定削減トークン',data:tk,borderColor:'#1D9E75',backgroundColor:'#1D9E75',borderWidth:2,pointRadius:2,tension:.3,yAxisID:'y1',order:1}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{boxWidth:12,font:{size:11}}}},
+      scales:{y:{position:'left',beginAtZero:true,title:{display:true,text:'回',font:{size:11}}},
+              y1:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false},ticks:{callback:v=>hum(v)}}}}
+  });
+}
+
+async function loadAuth(){
+  const d=await api('/auth/me');
+  if(d&&d.oauth_enabled&&d.user){document.getElementById('auth-user').textContent=d.user;const b=document.getElementById('auth-box');b.classList.remove('hidden');b.classList.add('flex');}
+}
+
+async function load(){
+  loadAuth();
+  const d=await api('/api/token-cutter/stats?days='+days);
+  if(!d){document.getElementById('cards').innerHTML='<p class="text-sm text-gray-400">読み込みに失敗しました</p>';return;}
+  document.getElementById('since').textContent=d.since+' 〜';
+  const t=d.totals;
+  document.getElementById('cards').innerHTML=[
+    card('検知・助言回数', fmt(t.events)+'<span class="text-xs text-gray-400"> 回</span>', '重い手を着手前に検知'),
+    card('推定削減トークン', hum(t.est_tokens), '避けられた上限見積り'),
+    card('対象PC', fmt(t.pcs), '稼働マシン数'),
+    card('期間', days+'日', d.since+' 〜'),
+  ].join('');
+  const maxR=Math.max(1,...t.by_reason.map(r=>r.count));
+  const maxP=Math.max(1,...t.by_pc.map(r=>r.count));
+  const maxT=Math.max(1,...t.by_tool.map(r=>r.count));
+  document.getElementById('byReason').innerHTML=bars(t.by_reason,maxR,REASON_JA,'#7F77DD');
+  document.getElementById('byPc').innerHTML=bars(t.by_pc,maxP,null,'#1D9E75');
+  document.getElementById('byTool').innerHTML=bars(t.by_tool,maxT,null,'#D85A30');
+  renderDaily(d);
+  const rc=d.recent||[];
+  document.getElementById('recent').innerHTML = rc.length? rc.map(e=>`
+    <div class="py-2 flex items-center gap-3 flex-wrap">
+      <span class="text-xs text-gray-400 w-32">${esc(new Date(e.occurred_at).toLocaleString('ja-JP'))}</span>
+      <span class="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">${esc(REASON_JA[e.reason]||e.reason)}</span>
+      <span class="text-xs text-gray-500">${esc(e.tool)}</span>
+      ${e.pc?`<span class="text-xs text-gray-500">${esc(e.pc)}</span>`:''}
+      ${e.target_kb?`<span class="text-xs text-gray-400">${fmt(e.target_kb)}KB</span>`:''}
+      <span class="text-xs text-emerald-600 ml-auto">~${hum(e.est_tokens)} tok</span>
+    </div>`).join('') : '<p class="text-xs text-gray-400 py-2">まだ検知イベントがありません</p>';
+}
+load();
+</script>
+</body>
+</html>

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.auth import require_api_key
 from app.middleware import BrowserAuthMiddleware
-from app.routers import admin, auth_oauth, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, nightly, search, webhook
+from app.routers import admin, auth_oauth, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, nightly, search, token_cutter, webhook
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _logger = logging.getLogger(__name__)
@@ -86,6 +86,8 @@ _protected = [Depends(require_api_key)]
 app.include_router(dashboard.router, prefix="/api")  # /stats /recent /tags /chunks/{id} /search/cross-project
 app.include_router(search.router, prefix="/api")     # /search /search/hybrid
 app.include_router(devin.router, prefix="/api")      # /devin/recall=開放, /devin/memorize=EP単位で保護
+# token-cutter: /event=開放(各PCのフックが鍵なしでPOST) / /stats=閲覧保護(middleware)
+app.include_router(token_cutter.router, prefix="/api")
 
 # --- 書き込み・バッチ・外部取込系：保護 ---
 app.include_router(ingest.router, prefix="/api", dependencies=_protected)
@@ -116,6 +118,11 @@ async def growth_page():
 @app.get("/daily", include_in_schema=False)
 async def daily_page():
     return FileResponse(_STATIC_DIR / "daily.html")
+
+
+@app.get("/token-cutter", include_in_schema=False)
+async def token_cutter_page():
+    return FileResponse(_STATIC_DIR / "token-cutter.html")
 
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
