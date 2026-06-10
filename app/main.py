@@ -113,4 +113,9 @@ async def growth_page():
     return FileResponse(_STATIC_DIR / "growth.html")
 
 
+@app.get("/daily", include_in_schema=False)
+async def daily_page():
+    return FileResponse(_STATIC_DIR / "daily.html")
+
+
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")

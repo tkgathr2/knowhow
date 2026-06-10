@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -536,3 +536,137 @@ async def get_growth(
         totals=totals,
         by_source_type=by_source_type,
     )
+
+
+# --- 日次の成長ログ（毎日「何が」増えた/使われた/沈んだか）-------------------
+class DailyItem(BaseModel):
+    chunk_id: int
+    project_key: str
+    chunk_type: str
+    source_type: str
+    preview: str
+    tags: list[str]
+    confidence: float
+    recall_count: int
+    is_deprecated: bool
+    created_at: datetime
+
+
+class DailyEntry(BaseModel):
+    date: str
+    asset_added: int
+    log_added: int
+    deprecated: int
+    recalled: int
+    items: list[DailyItem]
+    items_truncated: int
+
+
+class DailyResponse(BaseModel):
+    days: int
+    since: str
+    entries: list[DailyEntry]
+
+
+def _day_expr(col):
+    return func.to_char(func.date_trunc("day", col), "YYYY-MM-DD")
+
+
+@router.get("/growth/daily", response_model=DailyResponse)
+async def get_growth_daily(
+    days: int = 14,
+    project_key: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> DailyResponse:
+    days = max(1, min(days, 60))
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    where = [KbChunk.created_at >= since]
+    if project_key:
+        where.append(KbChunk.project_key == project_key)
+
+    created_day = _day_expr(KbChunk.created_at)
+
+    async def _counts(extra) -> dict[str, int]:
+        rows = await db.execute(
+            select(created_day.label("d"), func.count(KbChunk.id).label("c"))
+            .where(*where, extra)
+            .group_by(created_day)
+        )
+        return {r.d: r.c for r in rows if r.d}
+
+    asset_by_day = await _counts(KbChunk.source_type != _LOG_SOURCE)
+    log_by_day = await _counts(KbChunk.source_type == _LOG_SOURCE)
+    dep_by_day = await _counts(KbChunk.is_deprecated.is_(True))
+
+    # その日に「使われた（想起された）」数は last_recalled_at で見る
+    recalled_day = _day_expr(KbChunk.last_recalled_at)
+    recalled_where = [KbChunk.last_recalled_at.isnot(None), KbChunk.last_recalled_at >= since]
+    if project_key:
+        recalled_where.append(KbChunk.project_key == project_key)
+    recalled_rows = await db.execute(
+        select(recalled_day.label("d"), func.count(KbChunk.id).label("c"))
+        .where(*recalled_where)
+        .group_by(recalled_day)
+    )
+    recalled_by_day = {r.d: r.c for r in recalled_rows if r.d}
+
+    # その日に増えた「正味のナレッジ資産」の中身（新しい順）
+    item_rows = await db.execute(
+        select(
+            KbChunk.id,
+            KbChunk.project_key,
+            KbChunk.chunk_type,
+            KbChunk.source_type,
+            KbChunk.content,
+            KbChunk.tags,
+            KbChunk.confidence_score,
+            KbChunk.recall_count,
+            KbChunk.is_deprecated,
+            KbChunk.created_at,
+            created_day.label("d"),
+        )
+        .where(*where, KbChunk.source_type != _LOG_SOURCE)
+        .order_by(KbChunk.created_at.desc())
+        .limit(600)
+    )
+    items_by_day: dict[str, list[DailyItem]] = {}
+    for row in item_rows:
+        preview = (row.content or "")[:160]
+        if len(row.content or "") > 160:
+            preview += "…"
+        items_by_day.setdefault(row.d, []).append(
+            DailyItem(
+                chunk_id=row.id,
+                project_key=row.project_key,
+                chunk_type=row.chunk_type,
+                source_type=row.source_type,
+                preview=preview,
+                tags=row.tags or [],
+                confidence=round(float(row.confidence_score) * 100, 1),
+                recall_count=row.recall_count,
+                is_deprecated=row.is_deprecated,
+                created_at=row.created_at,
+            )
+        )
+
+    days_desc = growth_calc.daily_keys(
+        asset_by_day, log_by_day, dep_by_day, recalled_by_day, items_by_day
+    )
+    entries_raw = growth_calc.assemble_daily(
+        days_desc, asset_by_day, log_by_day, dep_by_day, recalled_by_day, items_by_day
+    )
+    entries = [
+        DailyEntry(
+            date=e["date"],
+            asset_added=e["asset_added"],
+            log_added=e["log_added"],
+            deprecated=e["deprecated"],
+            recalled=e["recalled"],
+            items=e["items"],
+            items_truncated=e["items_truncated"],
+        )
+        for e in entries_raw
+    ]
+    return DailyResponse(days=days, since=since.strftime("%Y-%m-%d"), entries=entries)
