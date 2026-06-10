@@ -54,6 +54,7 @@ class NameCount(BaseModel):
     name: str
     count: int
     est_tokens: int = 0
+    token_pct: float = 0.0
 
 
 class DailyPoint(BaseModel):
@@ -71,10 +72,20 @@ class RecentEvent(BaseModel):
     est_tokens: int
 
 
+class MoneyEstimate(BaseModel):
+    usd: float
+    jpy: int
+    jpy_human: str
+    usd_per_mtok: float
+    usdjpy: float
+
+
 class TokenCutterTotals(BaseModel):
     events: int
     est_tokens: int
     est_tokens_human: str
+    est_tokens_per_event: int
+    money: MoneyEstimate
     pcs: int
     by_reason: list[NameCount]
     by_pc: list[NameCount]
@@ -111,6 +122,7 @@ async def get_stats(
         )
     ).one()
     total_events, total_tokens, total_pcs = totals_row
+    _money = tc.estimate_money(int(total_tokens))
 
     daily_rows = (
         await db.execute(
@@ -147,7 +159,12 @@ async def get_stats(
             )
         ).all()
         return [
-            NameCount(name=(k if k is not None else "(unknown)"), count=int(c), est_tokens=int(t))
+            NameCount(
+                name=(k if k is not None else "(unknown)"),
+                count=int(c),
+                est_tokens=int(t),
+                token_pct=tc.share_pct(int(t), int(total_tokens)),
+            )
             for k, c, t in rows
         ]
 
@@ -177,6 +194,10 @@ async def get_stats(
             events=total_events,
             est_tokens=int(total_tokens),
             est_tokens_human=tc.humanize_tokens(int(total_tokens)),
+            est_tokens_per_event=(
+                int(round(int(total_tokens) / total_events)) if total_events else 0
+            ),
+            money=MoneyEstimate(jpy_human=tc.humanize_jpy(_money["jpy"]), **_money),
             pcs=total_pcs,
             by_reason=by_reason,
             by_pc=by_pc,
