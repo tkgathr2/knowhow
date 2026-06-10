@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノウハウキング君 — 成長ダッシュボード</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .seg { padding: 5px 14px; font-size: 0.8rem; font-weight: 500; border-radius: 8px; cursor: pointer; transition: all 0.15s; background: #f3f4f6; color: #6b7280; }
+  .seg.active { background: #4f46e5; color: white; }
+  .seg:not(.active):hover { background: #e5e7eb; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17l6-6 4 4 8-8m0 0h-5m5 0v5"/></svg>
+      </div>
+      <h1 class="text-lg font-bold text-gray-900">成長ダッシュボード</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">ノウハウキング君</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        一覧へ
+      </a>
+      <button onclick="load()" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">更新</button>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+
+  <div id="narrative" class="bg-indigo-50 border border-indigo-100 rounded-xl px-5 py-4 text-indigo-900 text-sm fade-in">読み込み中...</div>
+
+  <div class="flex flex-wrap items-center gap-3">
+    <div class="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1">
+      <span id="s-all" class="seg active" onclick="setSeries('all')">全体</span>
+      <span id="s-asset" class="seg" onclick="setSeries('asset')">ナレッジ資産</span>
+      <span id="s-log" class="seg" onclick="setSeries('log')">取込ログ</span>
+    </div>
+    <div class="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1">
+      <span id="b-month" class="seg active" onclick="setBucket('month')">月次</span>
+      <span id="b-week" class="seg" onclick="setBucket('week')">週次</span>
+    </div>
+    <span class="text-xs text-gray-400">基準: <span id="baseline">-</span></span>
+  </div>
+
+  <div id="cards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">累計ナレッジの伸び</h2>
+    <p class="text-xs text-gray-400 mb-3">選択中の系列の累計推移</p>
+    <div style="position:relative;height:240px;"><canvas id="cumChart" role="img" aria-label="累計ナレッジ件数の推移"></canvas></div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+    <div class="flex items-baseline gap-2 mb-1">
+      <h2 class="font-semibold text-sm text-gray-700">期間別の純増と成長率</h2>
+      <span class="text-xs text-gray-400">棒=追加件数 / 折線=前期比% / 薄棒=今期の着地予測</span>
+    </div>
+    <div style="position:relative;height:240px;margin-top:8px;"><canvas id="momChart" role="img" aria-label="期間別の純増件数と前期比成長率"></canvas></div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+      <h2 class="font-semibold text-sm text-gray-700 mb-3">取込元（source_type）の内訳</h2>
+      <div id="srcBars" class="space-y-2"></div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+      <h2 class="font-semibold text-sm text-gray-700 mb-3">新陳代謝（期間別の非推奨化）</h2>
+      <div style="position:relative;height:180px;"><canvas id="depChart" role="img" aria-label="期間別の非推奨化件数"></canvas></div>
+    </div>
+  </div>
+
+</div>
+
+<footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">ノウハウキング君 — 成長ダッシュボード</footer>
+
+<script>
+const API = window.location.origin;
+let series = 'all';
+let bucket = 'month';
+let cumChart, momChart, depChart;
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function fmt(n){return n==null?'-':Number(n).toLocaleString('ja-JP');}
+function pct(n){return n==null?'—':(n>=0?'+':'')+Number(n).toFixed(1)+'%';}
+
+async function api(path){try{const r=await fetch(API+path);if(!r.ok)return null;return await r.json();}catch{return null;}}
+
+function setSeries(s){series=s;['all','asset','log'].forEach(k=>document.getElementById('s-'+k).classList.toggle('active',k===s));load();}
+function setBucket(b){bucket=b;['month','week'].forEach(k=>document.getElementById('b-'+k).classList.toggle('active',k===b));load();}
+
+function card(label,value,sub,subClass){
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 fade-in">
+    <div class="text-xs text-gray-500">${esc(label)}</div>
+    <div class="text-2xl font-bold text-gray-900 mt-0.5">${value}</div>
+    <div class="text-xs mt-0.5 ${subClass||'text-gray-400'}">${sub||''}</div>
+  </div>`;
+}
+
+function renderCards(d){
+  const t=d.totals;
+  const cur=d.current_period;
+  const last=d.points.length?d.points[d.points.length-1]:null;
+  const growthSub=last&&last.growth_pct!=null?`<span class="text-emerald-600">${pct(last.growth_pct)} 前期比</span>`:'評価対象外';
+  const projSub=cur?`着地 約${fmt(cur.projected_added)}件 / ${pct(cur.projected_growth_pct)}`:'進行中の期なし';
+  const helpfulSub=t.helpful_rate==null?'未評価':`有用度 ${t.helpful_rate}%`;
+  document.getElementById('cards').innerHTML=[
+    card('ナレッジ資産', fmt(t.asset)+'<span class="text-xs text-gray-400"> 件</span>', last?`今期 +${fmt(last.added)}（選択系列）`:'', 'text-emerald-600'),
+    card('取込ログ（自動）', fmt(t.log)+'<span class="text-xs text-gray-400"> 件</span>', 'GitHub push/pr 等', 'text-gray-400'),
+    card('今期の成長率', last&&last.growth_pct!=null?pct(last.growth_pct):'—', projSub, 'text-indigo-500'),
+    card('想起（活用）回数', fmt(t.recall_total), `使われた資産 ${fmt(t.recalled_chunks)}件`, 'text-gray-400'),
+    card('平均信頼度', t.avg_confidence==null?'—':t.avg_confidence+'%', '資産の確からしさ', 'text-gray-400'),
+    card('有用度', t.helpful_rate==null?'未評価':t.helpful_rate+'%', helpfulSub, 'text-gray-400'),
+    card('ベクトル化率', t.vectorized_pct+'%', `${fmt(t.embedded)} / ${fmt(t.chunks)}`, 'text-gray-400'),
+    card('新陳代謝', fmt(t.deprecated)+'<span class="text-xs text-gray-400"> 件</span>', '非推奨で沈んだ知識', 'text-gray-400'),
+  ].join('');
+}
+
+function renderCum(d){
+  const labels=d.points.map(p=>p.period);
+  const data=d.points.map(p=>p.cumulative);
+  if(cumChart)cumChart.destroy();
+  cumChart=new Chart(document.getElementById('cumChart'),{
+    type:'line',
+    data:{labels,datasets:[{label:'累計',data,borderColor:'#4f46e5',backgroundColor:'rgba(79,70,229,.10)',fill:true,tension:.3,pointRadius:3,borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}
+  });
+}
+
+function renderMom(d){
+  const labels=d.points.map(p=>p.period);
+  const adds=d.points.map(p=>p.added);
+  const growth=d.points.map(p=>p.growth_pct);
+  const proj=labels.map(()=>null);
+  if(d.current_period){
+    const i=labels.indexOf(d.current_period.period);
+    if(i>=0) proj[i]=d.current_period.projected_added;
+  }
+  if(momChart)momChart.destroy();
+  momChart=new Chart(document.getElementById('momChart'),{
+    data:{labels,datasets:[
+      {type:'bar',label:'追加件数',data:adds,backgroundColor:'#5DCAA5',borderColor:'#0F6E56',borderWidth:1,yAxisID:'y',order:2},
+      {type:'bar',label:'着地予測',data:proj,backgroundColor:'rgba(93,202,165,.35)',borderColor:'#0F6E56',borderWidth:1,borderDash:[4,3],yAxisID:'y',order:3},
+      {type:'line',label:'成長率%',data:growth,borderColor:'#D85A30',backgroundColor:'#D85A30',borderWidth:2,pointRadius:3,borderDash:[5,4],spanGaps:true,yAxisID:'y1',order:1},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:true,labels:{boxWidth:12,font:{size:11}}}},
+      scales:{
+        y:{position:'left',beginAtZero:true,stacked:false,title:{display:true,text:'件',font:{size:11}}},
+        y1:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false},ticks:{callback:v=>v+'%'}}
+      }}
+  });
+}
+
+function renderSrc(d){
+  const rows=d.by_source_type||[];
+  const max=rows.reduce((m,r)=>Math.max(m,r.count),1);
+  const colorOf=s=>s==='webhook'?'#9ca3af':'#7F77DD';
+  document.getElementById('srcBars').innerHTML=rows.map(r=>`
+    <div class="flex items-center gap-3">
+      <span class="w-32 text-xs text-gray-600 truncate" title="${esc(r.source_type)}">${esc(r.source_type)}${r.source_type==='webhook'?'<span class="text-gray-400">（ログ）</span>':''}</span>
+      <span class="flex-1 h-3.5 bg-gray-100 rounded overflow-hidden"><span style="display:block;height:100%;width:${Math.round(r.count/max*100)}%;background:${colorOf(r.source_type)};border-radius:4px;"></span></span>
+      <span class="w-12 text-right text-xs font-semibold text-gray-700">${fmt(r.count)}</span>
+    </div>`).join('') || '<p class="text-xs text-gray-400">データなし</p>';
+}
+
+function renderDep(d){
+  const labels=d.points.map(p=>p.period);
+  const dep=d.points.map(p=>p.deprecated_added);
+  if(depChart)depChart.destroy();
+  depChart=new Chart(document.getElementById('depChart'),{
+    type:'bar',
+    data:{labels,datasets:[{label:'非推奨化',data:dep,backgroundColor:'#F0997B',borderColor:'#993C1D',borderWidth:1}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}
+  });
+}
+
+async function load(){
+  const d=await api(`/api/stats/growth?bucket=${bucket}&series=${series}`);
+  if(!d){document.getElementById('narrative').textContent='データの取得に失敗しました。';return;}
+  document.getElementById('narrative').textContent=d.narrative;
+  document.getElementById('baseline').textContent=d.baseline_period||'-';
+  renderCards(d);
+  renderCum(d);
+  renderMom(d);
+  renderSrc(d);
+  renderDep(d);
+}
+
+load();
+</script>
+</body>
+</html>

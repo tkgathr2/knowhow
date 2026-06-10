@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select, text
+from sqlalchemy import case, distinct, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import growth as growth_calc
 from app.database import get_db
 from app.models import KbChunk, KbProject, KbSession
 
@@ -358,4 +359,180 @@ async def cross_project_search(
     )[:top_k]
     return CrossProjectSearchResponse(
         results=results, query=req.query, total=len(results)
+    )
+
+
+# --- 成長ダッシュボード（HO: knowhow growth）---------------------------------
+# source_type='webhook'（GitHub の push/pr 自動取込）を「取込ログ」、それ以外
+# （session / learning / external / stackoverflow）を「正味のナレッジ資産」とみなす。
+# 総量で成長を過大評価しないよう、資産とログを分けて集計する。
+_LOG_SOURCE = "webhook"
+
+
+class GrowthPoint(BaseModel):
+    period: str
+    added: int
+    cumulative: int
+    growth_pct: float | None
+    deprecated_added: int
+
+
+class GrowthCurrent(BaseModel):
+    period: str
+    added_so_far: int
+    days_elapsed: int
+    days_in_period: int
+    projected_added: int
+    projected_growth_pct: float | None
+
+
+class GrowthTotals(BaseModel):
+    chunks: int
+    asset: int
+    log: int
+    deprecated: int
+    embedded: int
+    vectorized_pct: float
+    avg_confidence: float | None
+    helpful_rate: float | None
+    recall_total: int
+    recalled_chunks: int
+    projects: int
+
+
+class SourceTypeStat(BaseModel):
+    source_type: str
+    count: int
+
+
+class GrowthResponse(BaseModel):
+    bucket: str
+    series: str
+    baseline_period: str | None
+    narrative: str
+    points: list[GrowthPoint]
+    current_period: GrowthCurrent | None
+    totals: GrowthTotals
+    by_source_type: list[SourceTypeStat]
+
+
+@router.get("/stats/growth", response_model=GrowthResponse)
+async def get_growth(
+    bucket: str = "month",
+    series: str = "all",
+    project_key: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> GrowthResponse:
+    if bucket not in ("month", "week"):
+        bucket = "month"
+    if series not in ("asset", "log", "all"):
+        series = "all"
+
+    trunc_unit = "week" if bucket == "week" else "month"
+    label_fmt = 'IYYY-"W"IW' if bucket == "week" else "YYYY-MM"
+    period_expr = func.to_char(
+        func.date_trunc(trunc_unit, KbChunk.created_at), label_fmt
+    )
+
+    base_where = []
+    if project_key:
+        base_where.append(KbChunk.project_key == project_key)
+
+    series_where = list(base_where)
+    if series == "asset":
+        series_where.append(KbChunk.source_type != _LOG_SOURCE)
+    elif series == "log":
+        series_where.append(KbChunk.source_type == _LOG_SOURCE)
+
+    # 期間別の追加件数
+    added_rows = await db.execute(
+        select(period_expr.label("period"), func.count(KbChunk.id).label("cnt"))
+        .where(*series_where)
+        .group_by(period_expr)
+    )
+    added_by_period = {row.period: row.cnt for row in added_rows if row.period}
+
+    # 期間別の非推奨化（新陳代謝）件数：作成期間ごとに、現在 is_deprecated の数
+    dep_rows = await db.execute(
+        select(period_expr.label("period"), func.count(KbChunk.id).label("cnt"))
+        .where(*series_where, KbChunk.is_deprecated.is_(True))
+        .group_by(period_expr)
+    )
+    deprecated_by_period = {row.period: row.cnt for row in dep_rows if row.period}
+
+    points = growth_calc.build_points(added_by_period, deprecated_by_period)
+    now = datetime.now(timezone.utc)
+    current = growth_calc.project_current(points, now, bucket)
+    narrative = growth_calc.make_narrative(points, current)
+    baseline_period = points[0]["period"] if points else None
+
+    # 総量（series ではなく project_key だけで絞る＝資産/ログの全体像を見せる）
+    totals_row = (
+        await db.execute(
+            select(
+                func.count(KbChunk.id),
+                func.count(case((KbChunk.source_type != _LOG_SOURCE, KbChunk.id))),
+                func.count(case((KbChunk.source_type == _LOG_SOURCE, KbChunk.id))),
+                func.count(case((KbChunk.is_deprecated.is_(True), KbChunk.id))),
+                func.count(case((KbChunk.embedding.isnot(None), KbChunk.id))),
+                func.avg(
+                    case((KbChunk.source_type != _LOG_SOURCE, KbChunk.confidence_score))
+                ),
+                func.coalesce(func.sum(KbChunk.helpful_count), 0),
+                func.coalesce(func.sum(KbChunk.unhelpful_count), 0),
+                func.coalesce(func.sum(KbChunk.recall_count), 0),
+                func.count(case((KbChunk.recall_count > 0, KbChunk.id))),
+                func.count(distinct(KbChunk.project_key)),
+            ).where(*base_where)
+        )
+    ).one()
+    (
+        t_chunks,
+        t_asset,
+        t_log,
+        t_deprecated,
+        t_embedded,
+        t_avg_conf,
+        t_helpful,
+        t_unhelpful,
+        t_recall,
+        t_recalled_chunks,
+        t_projects,
+    ) = totals_row
+
+    totals = GrowthTotals(
+        chunks=t_chunks,
+        asset=t_asset,
+        log=t_log,
+        deprecated=t_deprecated,
+        embedded=t_embedded,
+        vectorized_pct=growth_calc.vectorized_pct(t_embedded, t_chunks),
+        avg_confidence=(
+            round(float(t_avg_conf) * 100, 1) if t_avg_conf is not None else None
+        ),
+        helpful_rate=growth_calc.helpful_rate(t_helpful, t_unhelpful),
+        recall_total=t_recall,
+        recalled_chunks=t_recalled_chunks,
+        projects=t_projects,
+    )
+
+    st_rows = await db.execute(
+        select(KbChunk.source_type, func.count(KbChunk.id).label("cnt"))
+        .where(*base_where)
+        .group_by(KbChunk.source_type)
+        .order_by(func.count(KbChunk.id).desc())
+    )
+    by_source_type = [
+        SourceTypeStat(source_type=row.source_type, count=row.cnt) for row in st_rows
+    ]
+
+    return GrowthResponse(
+        bucket=bucket,
+        series=series,
+        baseline_period=baseline_period,
+        narrative=narrative,
+        points=[GrowthPoint(**p) for p in points],
+        current_period=GrowthCurrent(**current) if current else None,
+        totals=totals,
+        by_source_type=by_source_type,
     )

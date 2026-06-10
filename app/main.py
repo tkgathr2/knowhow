@@ -101,4 +101,9 @@ async def root():
     return FileResponse(_STATIC_DIR / "index.html")
 
 
+@app.get("/growth", include_in_schema=False)
+async def growth_page():
+    return FileResponse(_STATIC_DIR / "growth.html")
+
+
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
