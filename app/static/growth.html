@@ -93,6 +93,15 @@
     </div>
   </div>
 
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+    <div class="flex items-baseline gap-2 mb-1">
+      <h2 class="font-semibold text-sm text-gray-700">活用（想起 recall）</h2>
+      <span id="usageUtil" class="text-xs text-gray-400"></span>
+    </div>
+    <p class="text-xs text-gray-400 mb-3">よく使われた学び＝生きている知識。未活用は埋もれた資産。</p>
+    <div id="topRecalled" class="space-y-2"></div>
+  </div>
+
 </div>
 
 <footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">ノウハウキング君 — 成長ダッシュボード</footer>
@@ -207,6 +216,23 @@ async function loadAuth(){
   }
 }
 
+async function loadUsage(){
+  const u=await api('/api/stats/usage?days=30');
+  if(!u)return;
+  document.getElementById('usageUtil').textContent=
+    `活用率 ${u.utilization_pct}% ／ 想起総数 ${fmt(u.total_recalls)} ／ 直近30日 ${fmt(u.recent_active)}件が使われた ／ 未活用 ${fmt(u.never_recalled)}件`;
+  const max=Math.max(1,...u.top_recalled.map(t=>t.recall_count));
+  document.getElementById('topRecalled').innerHTML = u.top_recalled.length ? u.top_recalled.map(t=>`
+    <div class="flex items-center gap-3">
+      <span class="w-10 text-right text-xs font-semibold text-emerald-600">🔁${fmt(t.recall_count)}</span>
+      <span class="flex-1 min-w-0">
+        <span class="text-xs text-gray-500">${esc(t.project_key)} · ${esc(t.chunk_type)}</span>
+        <span class="block text-sm text-gray-700 truncate">${esc(t.preview)}</span>
+      </span>
+      <span class="w-16 h-2 bg-gray-100 rounded overflow-hidden flex-shrink-0"><span style="display:block;height:100%;width:${Math.round(t.recall_count/max*100)}%;background:#1D9E75;"></span></span>
+    </div>`).join('') : '<p class="text-xs text-gray-400">まだ想起された学びがありません</p>';
+}
+
 async function load(){
   loadAuth();
   const d=await api(`/api/stats/growth?bucket=${bucket}&series=${series}`);
@@ -218,6 +244,7 @@ async function load(){
   renderMom(d);
   renderSrc(d);
   renderDep(d);
+  loadUsage();
 }
 
 load();

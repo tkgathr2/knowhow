@@ -1,0 +1,23 @@
+name: weekly-growth-summary
+# 学習ループ第2弾：週1で「今週どれだけ学び・使われ・賢くなったか」の要約を取得する。
+# 月曜 08:00 JST (= 日曜 23:00 UTC)。通知ON(Slack等)は対人送信のため社長確認後に拡張する。
+# 現状は GitHub Actions のログに要約を出力（後から Slack/Notion 連携を足せる土台）。
+on:
+  schedule:
+    - cron: '0 23 * * 0'   # 月曜 08:00 JST
+  workflow_dispatch: {}     # 手動実行も可
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch weekly growth summary
+        env:
+          KB_API_KEY: ${{ secrets.KB_API_KEY }}
+        run: |
+          BASE=https://knowhow.up.railway.app
+          AUTH=()
+          if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
+          echo "== 週次成長サマリ =="
+          curl -fsS --max-time 60 "${AUTH[@]}" "$BASE/api/stats/weekly-summary" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('narrative','(no data)')); print('期間:', d.get('week_start'),'〜',d.get('week_end'))" \
+            || echo "(週次サマリ取得に失敗。鍵未設定 or サーバ未応答)"
