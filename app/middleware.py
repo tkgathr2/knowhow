@@ -19,9 +19,10 @@ from starlette.responses import JSONResponse, RedirectResponse
 from app import authn
 from app import session as sess
 
-_PAGE_PATHS = {"/", "/growth"}
+_PAGE_PATHS = {"/", "/growth", "/daily"}
 _PROTECTED_API_PREFIXES = (
     "/api/stats",
+    "/api/growth",
     "/api/recent",
     "/api/tags",
     "/api/chunks",

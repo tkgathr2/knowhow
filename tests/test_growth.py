@@ -108,3 +108,40 @@ def test_vectorized_pct():
     assert growth.vectorized_pct(1735, 1735) == 100.0
     assert growth.vectorized_pct(0, 0) == 0.0
     assert growth.vectorized_pct(1, 3) == 33.3
+
+
+def test_daily_keys_union_desc():
+    keys = growth.daily_keys(
+        {"2026-06-08": 1, "2026-06-10": 2},
+        {"2026-06-09": 3},
+        {},
+        {},
+        {"2026-06-10": 5},
+    )
+    assert keys == ["2026-06-10", "2026-06-09", "2026-06-08"]
+
+
+def test_assemble_daily_caps_items_and_counts():
+    items = {"2026-06-10": list(range(25))}  # 25件
+    entries = growth.assemble_daily(
+        ["2026-06-10", "2026-06-09"],
+        asset_by_day={"2026-06-10": 25},
+        log_by_day={"2026-06-09": 4},
+        dep_by_day={},
+        recalled_by_day={"2026-06-10": 7},
+        items_by_day=items,
+        per_day_item_cap=20,
+    )
+    assert entries[0]["date"] == "2026-06-10"
+    assert entries[0]["asset_added"] == 25
+    assert entries[0]["recalled"] == 7
+    assert len(entries[0]["items"]) == 20  # cap
+    assert entries[0]["items_truncated"] == 5  # 25-20
+    # 2日目は items 無し・ログのみ
+    assert entries[1]["log_added"] == 4
+    assert entries[1]["items"] == []
+    assert entries[1]["items_truncated"] == 0
+
+
+def test_assemble_daily_empty():
+    assert growth.assemble_daily([], {}, {}, {}, {}, {}) == []

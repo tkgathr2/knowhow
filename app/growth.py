@@ -140,3 +140,42 @@ def vectorized_pct(embedded: int, total: int) -> float:
     if total <= 0:
         return 0.0
     return round(embedded / total * 100, 1)
+
+
+def daily_keys(*by_day_dicts: dict[str, object]) -> list[str]:
+    """各 dict の日付キーの和集合を、新しい日付が先頭になるよう降順で返す。"""
+    keys: set[str] = set()
+    for d in by_day_dicts:
+        keys.update(d.keys())
+    return sorted(keys, reverse=True)
+
+
+def assemble_daily(
+    days_desc: list[str],
+    asset_by_day: dict[str, int],
+    log_by_day: dict[str, int],
+    dep_by_day: dict[str, int],
+    recalled_by_day: dict[str, int],
+    items_by_day: dict[str, list],
+    per_day_item_cap: int = 20,
+) -> list[dict]:
+    """日付ごとに「その日に何が増えた/使われた/沈んだか」を1エントリへまとめる。
+
+    items は «その日に追加された正味のナレッジ資産» の抜粋。多すぎる日は cap で
+    切り、切った件数を items_truncated に残す（黙って捨てない）。
+    """
+    out: list[dict] = []
+    for day in days_desc:
+        items = items_by_day.get(day, [])
+        out.append(
+            {
+                "date": day,
+                "asset_added": asset_by_day.get(day, 0),
+                "log_added": log_by_day.get(day, 0),
+                "deprecated": dep_by_day.get(day, 0),
+                "recalled": recalled_by_day.get(day, 0),
+                "items": items[:per_day_item_cap],
+                "items_truncated": max(0, len(items) - per_day_item_cap),
+            }
+        )
+    return out

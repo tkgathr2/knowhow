@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノウハウキング君 — 成長の毎日ログ</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .chunk-content { white-space: pre-wrap; word-break: break-word; }
+  .seg { padding: 5px 14px; font-size: 0.8rem; font-weight: 500; border-radius: 8px; cursor: pointer; transition: all 0.15s; background: #f3f4f6; color: #6b7280; }
+  .seg.active { background: #4f46e5; color: white; }
+  .seg:not(.active):hover { background: #e5e7eb; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 9999px; font-size: 0.7rem; font-weight: 500; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      </div>
+      <h1 class="text-lg font-bold text-gray-900">成長の毎日ログ</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">ノウハウキング君</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/growth" class="text-sm px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition">グラフ</a>
+      <a href="/" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">一覧</a>
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-4xl mx-auto px-4 py-6">
+  <div class="flex items-center gap-2 mb-5">
+    <span class="text-xs text-gray-400 mr-1">期間</span>
+    <span id="d-7" class="seg" onclick="setDays(7)">7日</span>
+    <span id="d-14" class="seg active" onclick="setDays(14)">14日</span>
+    <span id="d-30" class="seg" onclick="setDays(30)">30日</span>
+    <span id="since" class="text-xs text-gray-400 ml-2"></span>
+  </div>
+  <div id="timeline" class="space-y-6"></div>
+  <div id="empty" class="hidden p-10 text-center text-gray-400 text-sm">この期間の記録はありません</div>
+</div>
+
+<footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">ノウハウキング君 — 成長の毎日ログ</footer>
+
+<script>
+const API = window.location.origin;
+let days = 14;
+
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
+
+const TAGCOLORS=['bg-blue-100 text-blue-700','bg-green-100 text-green-700','bg-purple-100 text-purple-700','bg-orange-100 text-orange-700','bg-pink-100 text-pink-700','bg-teal-100 text-teal-700','bg-yellow-100 text-yellow-700','bg-red-100 text-red-700','bg-indigo-100 text-indigo-700'];
+function tagColor(t){let h=0;for(let i=0;i<t.length;i++)h=((h<<5)-h+t.charCodeAt(i))|0;return TAGCOLORS[Math.abs(h)%TAGCOLORS.length];}
+
+function dateLabel(d){
+  const dt=new Date(d+'T00:00:00');
+  const w=['日','月','火','水','木','金','土'][dt.getDay()];
+  const today=new Date();today.setHours(0,0,0,0);
+  const diff=Math.round((today-dt)/86400000);
+  let rel='';
+  if(diff===0)rel='今日';else if(diff===1)rel='昨日';else rel=diff+'日前';
+  return `${d}（${w}）<span class="text-xs text-gray-400 ml-1">${rel}</span>`;
+}
+
+function setDays(n){days=n;[7,14,30].forEach(k=>document.getElementById('d-'+k).classList.toggle('active',k===n));load();}
+
+function itemCard(it){
+  const conf = it.confidence!=null ? `<span class="text-xs text-gray-400">信頼度 ${it.confidence}%</span>` : '';
+  const recall = it.recall_count>0 ? `<span class="text-xs text-emerald-600" title="想起された回数"><i></i>🔁 ${it.recall_count}</span>` : '';
+  const dep = it.is_deprecated ? '<span class="tag bg-red-100 text-red-600">非推奨</span>' : '';
+  const tags=(it.tags||[]).slice(0,6).map(t=>`<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('');
+  return `<div class="px-3 py-2.5 hover:bg-gray-50 rounded-lg transition">
+    <div class="flex items-center gap-2 mb-1 flex-wrap">
+      <span class="tag bg-indigo-100 text-indigo-700">${esc(it.chunk_type)}</span>
+      <span class="text-xs text-gray-500">${esc(it.project_key)}</span>
+      ${dep}${recall}${conf}
+    </div>
+    <div class="chunk-content text-sm text-gray-700">${esc(it.preview)}</div>
+    <div class="flex gap-1 mt-1.5 flex-wrap">${tags}</div>
+  </div>`;
+}
+
+function dayBlock(e){
+  const chips=[];
+  if(e.asset_added>0)chips.push(`<span class="chip bg-emerald-100 text-emerald-700">学び +${e.asset_added}</span>`);
+  if(e.recalled>0)chips.push(`<span class="chip bg-indigo-100 text-indigo-700">想起 ${e.recalled}</span>`);
+  if(e.deprecated>0)chips.push(`<span class="chip bg-red-100 text-red-600">非推奨 ${e.deprecated}</span>`);
+  if(e.log_added>0)chips.push(`<span class="chip bg-gray-100 text-gray-500">取込ログ +${e.log_added}</span>`);
+  const items=(e.items||[]).map(itemCard).join('');
+  const more=e.items_truncated>0?`<div class="px-3 py-2 text-xs text-gray-400">…ほか ${e.items_truncated} 件</div>`:'';
+  const body=items?`<div class="divide-y divide-gray-50 mt-2">${items}${more}</div>`
+    :'<div class="px-3 py-2 text-xs text-gray-400">この日の新規ナレッジ資産はありません（活動のみ）</div>';
+  return `<div class="fade-in">
+    <div class="flex items-center gap-3 mb-2">
+      <h2 class="text-sm font-semibold text-gray-700">${dateLabel(e.date)}</h2>
+      <div class="flex items-center gap-1.5 flex-wrap">${chips.join('')}</div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-2">${body}</div>
+  </div>`;
+}
+
+async function loadAuth(){
+  const d=await api('/auth/me');
+  if(d&&d.oauth_enabled&&d.user){
+    document.getElementById('auth-user').textContent=d.user;
+    const b=document.getElementById('auth-box');b.classList.remove('hidden');b.classList.add('flex');
+  }
+}
+
+async function load(){
+  loadAuth();
+  const d=await api('/api/growth/daily?days='+days);
+  const tl=document.getElementById('timeline');
+  const empty=document.getElementById('empty');
+  if(!d){tl.innerHTML='<p class="text-sm text-gray-400">読み込みに失敗しました</p>';return;}
+  document.getElementById('since').textContent=d.since+' 〜';
+  if(!d.entries.length){tl.innerHTML='';empty.classList.remove('hidden');return;}
+  empty.classList.add('hidden');
+  tl.innerHTML=d.entries.map(dayBlock).join('');
+}
+
+load();
+</script>
+</body>
+</html>
