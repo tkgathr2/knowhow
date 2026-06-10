@@ -7,6 +7,14 @@
 
 from __future__ import annotations
 
+import os
+
+# 金額換算の前提（上限見積り）。避けられるのは「大型Read/広域Grep が食う入力トークン」
+# なので、入力トークン単価で換算する。Claude Code は Opus 実行なので Opus 4.x の
+# 入力 list 価格 $15 / 100万トークンを既定にする。為替は環境変数で上書き可。
+DEFAULT_USD_PER_MTOK = float(os.getenv("TOKEN_CUTTER_USD_PER_MTOK", "15.0"))
+DEFAULT_USDJPY = float(os.getenv("TOKEN_CUTTER_USDJPY", "150.0"))
+
 
 def daily_keys_desc(*by_day: dict[str, object]) -> list[str]:
     keys: set[str] = set()
@@ -39,3 +47,47 @@ def humanize_tokens(n: int) -> str:
     if n >= 1_000:
         return f"{round(n / 1_000, 1)}k"
     return str(n)
+
+
+def estimate_money(
+    tokens: int,
+    usd_per_mtok: float = DEFAULT_USD_PER_MTOK,
+    usdjpy: float = DEFAULT_USDJPY,
+) -> dict:
+    """推定削減トークンを金額（USD / JPY）に換算する（上限見積り）。
+
+    避けられるのは入力トークンなので入力単価で換算。確定額ではなく
+    「もし全部の助言に従っていたら避けられた上限額」である点は UI 側で明記する。
+    """
+    tokens = max(0, int(tokens or 0))
+    usd = round(tokens / 1_000_000 * usd_per_mtok, 2)
+    jpy = int(round(usd * usdjpy))
+    return {
+        "usd": usd,
+        "jpy": jpy,
+        "usd_per_mtok": usd_per_mtok,
+        "usdjpy": usdjpy,
+    }
+
+
+def humanize_jpy(jpy: int) -> str:
+    """円を読みやすく（>=1万→万、それ未満はカンマ区切り相当の素の値）。"""
+    jpy = int(jpy or 0)
+    if jpy >= 10_000:
+        return f"{round(jpy / 10_000, 1)}万円"
+    return f"{jpy:,}円"
+
+
+def share_pct(part: int, total: int) -> float:
+    """全体に占める割合（％・小数1桁）。total<=0 は 0.0。"""
+    if total <= 0:
+        return 0.0
+    return round(int(part or 0) / total * 100, 1)
+
+
+def with_shares(rows: list[dict], total_tokens: int) -> list[dict]:
+    """name/count/est_tokens の各行へ、削減トークンの占有率(token_pct)を付ける。"""
+    out: list[dict] = []
+    for r in rows:
+        out.append({**r, "token_pct": share_pct(r.get("est_tokens", 0), total_tokens)})
+    return out
