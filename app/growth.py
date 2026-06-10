@@ -96,12 +96,16 @@ def project_current(points: list[dict], now: datetime, bucket: str) -> dict | No
     }
 
 
-def make_narrative(points: list[dict], current: dict | None) -> str:
+_SERIES_NOUN = {"asset": "正味の学び", "log": "取込ログ", "all": "ナレッジ"}
+
+
+def make_narrative(points: list[dict], current: dict | None, series: str = "asset") -> str:
     """画面トップの一言サマリ（自動生成）。数字の羅列を解釈に変える。"""
     if not points:
         return "まだ成長データがありません。"
+    noun = _SERIES_NOUN.get(series, "ナレッジ")
     last = points[-1]
-    text = f"{last['period']} は正味の学び +{last['added']}件"
+    text = f"{last['period']} は{noun} +{last['added']}件"
     if last["growth_pct"] is not None:
         text += f"（前期比 +{last['growth_pct']}%）"
     if current is not None and len(points) >= 2:
