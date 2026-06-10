@@ -167,6 +167,39 @@ def make_weekly_narrative(d: dict) -> str:
     return "".join(parts) + "。" + tail
 
 
+def attach_daily_growth(entries_desc: list[dict], base_before: int) -> list[dict]:
+    """日次エントリ（新しい順）へ、累計資産と前日比成長率を付ける。
+
+    base_before = 集計期間より前に既にあった「正味ナレッジ資産」の累計。
+    各日 growth_pct = その日の asset_added / 前日終了時点の累計 × 100
+    （前日終了時点が 0 のときは None＝新規で割れない）。資産(asset_added)だけを
+    成長とみなす（取込ログ log_added は分母・分子に入れない）。
+    """
+    cumulative = max(0, int(base_before or 0))
+    annotated_asc: list[dict] = []
+    for e in reversed(entries_desc):  # 古い日から累積する
+        added = int(e.get("asset_added", 0))
+        prev = cumulative
+        cumulative += added
+        growth_pct = round(added / prev * 100, 1) if prev > 0 else None
+        annotated_asc.append({**e, "asset_cumulative": cumulative, "growth_pct": growth_pct})
+    annotated_asc.reverse()  # 新しい順へ戻す
+    return annotated_asc
+
+
+def latest_daily_growth(entries_desc: list[dict]) -> dict | None:
+    """最新日の前日比サマリ（画面の見出し用）。entries は attach 済みを渡す。"""
+    if not entries_desc:
+        return None
+    top = entries_desc[0]
+    return {
+        "date": top.get("date"),
+        "asset_added": int(top.get("asset_added", 0)),
+        "asset_cumulative": int(top.get("asset_cumulative", 0)),
+        "growth_pct": top.get("growth_pct"),
+    }
+
+
 def daily_keys(*by_day_dicts: dict[str, object]) -> list[str]:
     """各 dict の日付キーの和集合を、新しい日付が先頭になるよう降順で返す。"""
     keys: set[str] = set()
