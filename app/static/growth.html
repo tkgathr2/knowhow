@@ -69,6 +69,15 @@
   <div id="cards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+    <div class="flex items-baseline gap-2 mb-1 flex-wrap">
+      <h2 class="font-semibold text-sm text-gray-700">推定削減コスト（日次・コストカッターくん）</h2>
+      <span id="costSummary" class="text-xs text-emerald-600 font-semibold"></span>
+    </div>
+    <p class="text-xs text-gray-400 mb-3">棒=その日に避けられた推定コスト（円・上限見積り）。重い手を着手前に検知して節約した分。<a href="/token-cutter" class="text-indigo-500 underline">内訳→</a></p>
+    <div style="position:relative;height:200px;"><canvas id="costChart" role="img" aria-label="日次の推定削減コスト（円）"></canvas></div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
     <h2 class="font-semibold text-sm text-gray-700 mb-1">累計ナレッジの伸び</h2>
     <p class="text-xs text-gray-400 mb-3">選択中の系列の累計推移</p>
     <div style="position:relative;height:240px;"><canvas id="cumChart" role="img" aria-label="累計ナレッジ件数の推移"></canvas></div>
@@ -110,7 +119,7 @@
 const API = window.location.origin;
 let series = 'all';
 let bucket = 'month';
-let cumChart, momChart, depChart;
+let cumChart, momChart, depChart, costChart;
 
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function fmt(n){return n==null?'-':Number(n).toLocaleString('ja-JP');}
@@ -207,6 +216,26 @@ function renderDep(d){
   });
 }
 
+async function loadCost(){
+  const d=await api('/api/token-cutter/stats?days=30');
+  const sumEl=document.getElementById('costSummary');
+  if(!d||!d.daily||!d.daily.length){if(sumEl)sumEl.textContent='';if(costChart)costChart.destroy();return;}
+  const m=(d.totals&&d.totals.money)||{usd_per_mtok:15,usdjpy:150};
+  const rows=[...d.daily].reverse();  // 古い日→新しい日
+  const labels=rows.map(p=>p.date.slice(5));
+  const yen=rows.map(p=>Math.round((p.est_tokens||0)/1e6*m.usd_per_mtok*m.usdjpy));
+  const mn=d.totals.money||{};
+  if(sumEl)sumEl.textContent=`30日合計 ${mn.jpy_human||'0円'}（≈ $${fmt(mn.usd||0)}）`;
+  if(costChart)costChart.destroy();
+  costChart=new Chart(document.getElementById('costChart'),{
+    type:'bar',
+    data:{labels,datasets:[{label:'推定削減コスト(円)',data:yen,backgroundColor:'#5DCAA5',borderColor:'#0F6E56',borderWidth:1}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'¥'+Number(c.raw).toLocaleString('ja-JP')}}},
+      scales:{y:{beginAtZero:true,ticks:{callback:v=>'¥'+Number(v).toLocaleString('ja-JP')}}}}
+  });
+}
+
 async function loadAuth(){
   const d=await api('/auth/me');
   if(d&&d.oauth_enabled&&d.user){
@@ -245,6 +274,7 @@ async function load(){
   renderSrc(d);
   renderDep(d);
   loadUsage();
+  loadCost();
 }
 
 load();
