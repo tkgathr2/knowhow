@@ -32,6 +32,10 @@
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
         一覧へ
       </a>
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
       <button onclick="load()" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">更新</button>
     </div>
   </div>
@@ -186,7 +190,17 @@ function renderDep(d){
   });
 }
 
+async function loadAuth(){
+  const d=await api('/auth/me');
+  if(d&&d.oauth_enabled&&d.user){
+    document.getElementById('auth-user').textContent=d.user;
+    document.getElementById('auth-box').classList.remove('hidden');
+    document.getElementById('auth-box').classList.add('flex');
+  }
+}
+
 async function load(){
+  loadAuth();
   const d=await api(`/api/stats/growth?bucket=${bucket}&series=${series}`);
   if(!d){document.getElementById('narrative').textContent='データの取得に失敗しました。';return;}
   document.getElementById('narrative').textContent=d.narrative;

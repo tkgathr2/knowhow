@@ -8,7 +8,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import require_api_key
-from app.routers import admin, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, nightly, search, webhook
+from app.middleware import BrowserAuthMiddleware
+from app.routers import admin, auth_oauth, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, nightly, search, webhook
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _logger = logging.getLogger(__name__)
@@ -65,6 +66,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ブラウザ向けGoogleログイン保護（資格情報未設定の間は素通り＝挙動不変）
+app.add_middleware(BrowserAuthMiddleware)
+
+# Googleログイン動線（/auth/login, /auth/callback, /auth/logout, /auth/me）
+app.include_router(auth_oauth.router)
 
 # 認証なしで開放: ヘルスチェックのみ
 app.include_router(health.router)

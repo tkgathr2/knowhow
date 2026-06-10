@@ -42,6 +42,10 @@
         更新
       </button>
       <span id="health-badge" class="text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-500">...</span>
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
     </div>
   </div>
 </nav>
@@ -445,7 +449,18 @@ function filterByProject(pk) {
   loadTags();
 }
 
+async function loadAuth() {
+  const d = await api('/auth/me');
+  if (d && d.oauth_enabled && d.user) {
+    document.getElementById('auth-user').textContent = d.user;
+    const box = document.getElementById('auth-box');
+    box.classList.remove('hidden');
+    box.classList.add('flex');
+  }
+}
+
 function loadAll() {
+  loadAuth();
   checkHealth();
   loadStats();
   loadRecent();
