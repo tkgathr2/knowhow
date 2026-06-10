@@ -226,6 +226,16 @@ async function loadCost(){
   const yen=rows.map(p=>Math.round((p.est_tokens||0)/1e6*m.usd_per_mtok*m.usdjpy));
   const mn=d.totals.money||{};
   if(sumEl)sumEl.textContent=`30日合計 ${mn.jpy_human||'0円'}（≈ $${fmt(mn.usd||0)}）`;
+  // 最上段のKPIカードにも「推定削減コスト」を先頭に差し込む（開いた瞬間に見える）
+  const cardsEl=document.getElementById('cards');
+  if(cardsEl){
+    const ex=document.getElementById('cost-kpi');if(ex)ex.remove();
+    cardsEl.insertAdjacentHTML('afterbegin',`<div id="cost-kpi" class="bg-emerald-50 rounded-xl shadow-sm border border-emerald-200 p-4 fade-in">
+      <div class="text-xs text-emerald-700">推定削減コスト（30日）</div>
+      <div class="text-2xl font-bold text-emerald-700 mt-0.5">${esc(mn.jpy_human||'0円')}</div>
+      <div class="text-xs text-emerald-600 mt-0.5">≈ $${fmt(mn.usd||0)}・コストカッター</div>
+    </div>`);
+  }
   if(costChart)costChart.destroy();
   costChart=new Chart(document.getElementById('costChart'),{
     type:'bar',
