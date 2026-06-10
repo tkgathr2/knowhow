@@ -188,6 +188,23 @@ class KbRecallLog(Base):
     )
 
 
+class KbTokenCutterEvent(Base):
+    __tablename__ = "kb_token_cutter_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    pc = Column(Text)
+    tool = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    target_kb = Column(Integer)
+    est_tokens = Column(Integer, nullable=False, default=0)
+    meta = Column(JSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        Index("ix_tc_events_occurred", "occurred_at"),
+    )
+
+
 class KbExternalSource(Base):
     __tablename__ = "kb_external_sources"
 
