@@ -112,19 +112,21 @@ async def get_stats(
     ).one()
     total_events, total_tokens, total_pcs = totals_row
 
-    daily_rows = await db.execute(
-        select(
-            _DAY.label("d"),
-            func.count(KbTokenCutterEvent.id).label("c"),
-            func.coalesce(func.sum(KbTokenCutterEvent.est_tokens), 0).label("t"),
-        ).where(w).group_by(_DAY)
-    )
+    daily_rows = (
+        await db.execute(
+            select(
+                _DAY,
+                func.count(KbTokenCutterEvent.id),
+                func.coalesce(func.sum(KbTokenCutterEvent.est_tokens), 0),
+            ).where(w).group_by(_DAY)
+        )
+    ).all()
     events_by_day: dict[str, int] = {}
     tokens_by_day: dict[str, int] = {}
-    for r in daily_rows:
-        if r.d:
-            events_by_day[r.d] = r.c
-            tokens_by_day[r.d] = int(r.t)
+    for day, c, t in daily_rows:
+        if day:
+            events_by_day[day] = int(c)
+            tokens_by_day[day] = int(t)
     daily = [
         DailyPoint(**p)
         for p in tc.assemble_daily(
@@ -135,16 +137,18 @@ async def get_stats(
     ]
 
     async def _group(col) -> list[NameCount]:
-        rows = await db.execute(
-            select(
-                col.label("k"),
-                func.count(KbTokenCutterEvent.id).label("c"),
-                func.coalesce(func.sum(KbTokenCutterEvent.est_tokens), 0).label("t"),
-            ).where(w).group_by(col).order_by(func.count(KbTokenCutterEvent.id).desc())
-        )
+        rows = (
+            await db.execute(
+                select(
+                    col,
+                    func.count(KbTokenCutterEvent.id),
+                    func.coalesce(func.sum(KbTokenCutterEvent.est_tokens), 0),
+                ).where(w).group_by(col).order_by(func.count(KbTokenCutterEvent.id).desc())
+            )
+        ).all()
         return [
-            NameCount(name=(r.k if r.k is not None else "(unknown)"), count=r.c, est_tokens=int(r.t))
-            for r in rows
+            NameCount(name=(k if k is not None else "(unknown)"), count=int(c), est_tokens=int(t))
+            for k, c, t in rows
         ]
 
     by_reason = await _group(KbTokenCutterEvent.reason)
