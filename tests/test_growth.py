@@ -79,11 +79,19 @@ def test_make_narrative_accel_vs_decel():
     added = {"2026-04": 100, "2026-05": 50, "2026-06": 30}
     points = growth.build_points(added, {})
     cur = growth.project_current(points, _dt(2026, 6, 10), "month")  # 着地90
-    text = growth.make_narrative(points, cur)
+    text = growth.make_narrative(points, cur, "asset")
     assert "2026-06" in text
     assert "+30件" in text
+    assert "正味の学び" in text
     # 着地90 > 前期50 → 加速
     assert "加速" in text
+
+
+def test_make_narrative_series_noun():
+    points = growth.build_points({"2026-06": 10}, {})
+    assert "正味の学び" in growth.make_narrative(points, None, "asset")
+    assert "取込ログ" in growth.make_narrative(points, None, "log")
+    assert "ナレッジ" in growth.make_narrative(points, None, "all")
 
 
 def test_make_narrative_empty():

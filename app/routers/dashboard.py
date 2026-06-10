@@ -463,7 +463,7 @@ async def get_growth(
     points = growth_calc.build_points(added_by_period, deprecated_by_period)
     now = datetime.now(timezone.utc)
     current = growth_calc.project_current(points, now, bucket)
-    narrative = growth_calc.make_narrative(points, current)
+    narrative = growth_calc.make_narrative(points, current, series)
     baseline_period = points[0]["period"] if points else None
 
     # 総量（series ではなく project_key だけで絞る＝資産/ログの全体像を見せる）
