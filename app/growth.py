@@ -142,6 +142,31 @@ def vectorized_pct(embedded: int, total: int) -> float:
     return round(embedded / total * 100, 1)
 
 
+def pct_change(curr: int, prev: int) -> float | None:
+    """前期比（%）。前期0は None（割れない＝新規）。"""
+    if prev <= 0:
+        return None
+    return round((curr - prev) / prev * 100, 1)
+
+
+def make_weekly_narrative(d: dict) -> str:
+    """週次成長サマリの一言（自動生成）。今週 vs 先週を解釈に変える。"""
+    parts: list[str] = []
+    ch = pct_change(d.get("asset_now", 0), d.get("asset_prev", 0))
+    chs = f"（前週比 {'+' if (ch or 0) >= 0 else ''}{ch}%）" if ch is not None else ""
+    parts.append(f"今週の学び +{d.get('asset_now', 0)}件{chs}")
+    if d.get("recalls_now"):
+        parts.append(f"／想起 {d['recalls_now']}回")
+    if d.get("helpful_rate") is not None:
+        parts.append(f"／有用度 {d['helpful_rate']}%")
+    if d.get("deprecated_now"):
+        parts.append(f"／新陳代謝 {d['deprecated_now']}件沈下")
+    tail = ""
+    if d.get("util_pct") is not None:
+        tail = f" 資産の活用率 {d['util_pct']}%・未活用 {d.get('never_recalled', 0)}件。"
+    return "".join(parts) + "。" + tail
+
+
 def daily_keys(*by_day_dicts: dict[str, object]) -> list[str]:
     """各 dict の日付キーの和集合を、新しい日付が先頭になるよう降順で返す。"""
     keys: set[str] = set()

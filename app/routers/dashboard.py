@@ -670,3 +670,156 @@ async def get_growth_daily(
         for e in entries_raw
     ]
     return DailyResponse(days=days, since=since.strftime("%Y-%m-%d"), entries=entries)
+
+
+# --- ②使う：想起(recall)活用パネル -----------------------------------------
+class TopRecalled(BaseModel):
+    chunk_id: int
+    project_key: str
+    chunk_type: str
+    preview: str
+    recall_count: int
+    last_recalled_at: datetime | None
+
+
+class ProjectRecall(BaseModel):
+    project_key: str
+    recalls: int
+
+
+class UsageStats(BaseModel):
+    total_recalls: int
+    recalled_chunks: int
+    asset_chunks: int
+    never_recalled: int
+    utilization_pct: float
+    recent_active: int
+    by_project: list[ProjectRecall]
+    top_recalled: list[TopRecalled]
+
+
+@router.get("/stats/usage", response_model=UsageStats)
+async def get_usage(
+    days: int = 30, db: AsyncSession = Depends(get_db)
+) -> UsageStats:
+    days = max(1, min(days, 365))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    asset = KbChunk.source_type != _LOG_SOURCE
+
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(KbChunk.recall_count), 0),
+                func.count(case((KbChunk.recall_count > 0, KbChunk.id))),
+                func.count(case((asset, KbChunk.id))),
+                func.count(case((asset & (KbChunk.recall_count == 0), KbChunk.id))),
+                func.count(case((KbChunk.last_recalled_at >= since, KbChunk.id))),
+            )
+        )
+    ).one()
+    total_recalls, recalled_chunks, asset_chunks, never_recalled, recent_active = row
+
+    proj_rows = (
+        await db.execute(
+            select(KbChunk.project_key, func.coalesce(func.sum(KbChunk.recall_count), 0))
+            .where(KbChunk.recall_count > 0)
+            .group_by(KbChunk.project_key)
+            .order_by(func.coalesce(func.sum(KbChunk.recall_count), 0).desc())
+            .limit(10)
+        )
+    ).all()
+    by_project = [ProjectRecall(project_key=pk, recalls=int(c)) for pk, c in proj_rows]
+
+    top_rows = (
+        await db.execute(
+            select(
+                KbChunk.id, KbChunk.project_key, KbChunk.chunk_type,
+                KbChunk.content, KbChunk.recall_count, KbChunk.last_recalled_at,
+            )
+            .where(asset, KbChunk.recall_count > 0)
+            .order_by(KbChunk.recall_count.desc(), KbChunk.last_recalled_at.desc())
+            .limit(10)
+        )
+    ).all()
+    top_recalled = [
+        TopRecalled(
+            chunk_id=cid, project_key=pk, chunk_type=ct,
+            preview=((content or "")[:140] + ("…" if len(content or "") > 140 else "")),
+            recall_count=rc, last_recalled_at=lra,
+        )
+        for cid, pk, ct, content, rc, lra in top_rows
+    ]
+
+    return UsageStats(
+        total_recalls=int(total_recalls),
+        recalled_chunks=recalled_chunks,
+        asset_chunks=asset_chunks,
+        never_recalled=never_recalled,
+        utilization_pct=growth_calc.vectorized_pct(recalled_chunks, asset_chunks),
+        recent_active=recent_active,
+        by_project=by_project,
+        top_recalled=top_recalled,
+    )
+
+
+# --- ③賢く×週次：成長サマリ（cronが叩いて要約を返す）-----------------------
+class WeeklySummary(BaseModel):
+    week_start: str
+    week_end: str
+    asset_now: int
+    asset_prev: int
+    recalls_now: int
+    helpful_rate: float | None
+    deprecated_now: int
+    utilization_pct: float
+    never_recalled: int
+    narrative: str
+
+
+@router.get("/stats/weekly-summary", response_model=WeeklySummary)
+async def get_weekly_summary(db: AsyncSession = Depends(get_db)) -> WeeklySummary:
+    now = datetime.now(timezone.utc)
+    w1 = now - timedelta(days=7)
+    w2 = now - timedelta(days=14)
+    asset = KbChunk.source_type != _LOG_SOURCE
+
+    row = (
+        await db.execute(
+            select(
+                func.count(case((asset & (KbChunk.created_at >= w1), KbChunk.id))),
+                func.count(
+                    case((asset & (KbChunk.created_at >= w2) & (KbChunk.created_at < w1), KbChunk.id))
+                ),
+                func.count(case((KbChunk.last_recalled_at >= w1, KbChunk.id))),
+                func.count(case((asset & (KbChunk.created_at >= w1) & KbChunk.is_deprecated.is_(True), KbChunk.id))),
+                func.coalesce(func.sum(KbChunk.helpful_count), 0),
+                func.coalesce(func.sum(KbChunk.unhelpful_count), 0),
+                func.count(case((asset, KbChunk.id))),
+                func.count(case((asset & (KbChunk.recall_count > 0), KbChunk.id))),
+            )
+        )
+    ).one()
+    asset_now, asset_prev, recalls_now, deprecated_now, helpful, unhelpful, asset_total, recalled = row
+
+    helpful_rate = growth_calc.helpful_rate(helpful, unhelpful)
+    util = growth_calc.vectorized_pct(recalled, asset_total)
+    never = asset_total - recalled
+    narrative = growth_calc.make_weekly_narrative(
+        {
+            "asset_now": asset_now, "asset_prev": asset_prev, "recalls_now": recalls_now,
+            "helpful_rate": helpful_rate, "deprecated_now": deprecated_now,
+            "util_pct": util, "never_recalled": never,
+        }
+    )
+    return WeeklySummary(
+        week_start=w1.strftime("%Y-%m-%d"),
+        week_end=now.strftime("%Y-%m-%d"),
+        asset_now=asset_now,
+        asset_prev=asset_prev,
+        recalls_now=recalls_now,
+        helpful_rate=helpful_rate,
+        deprecated_now=deprecated_now,
+        utilization_pct=util,
+        never_recalled=never,
+        narrative=narrative,
+    )

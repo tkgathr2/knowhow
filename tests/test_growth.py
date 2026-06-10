@@ -110,6 +110,30 @@ def test_vectorized_pct():
     assert growth.vectorized_pct(1, 3) == 33.3
 
 
+def test_pct_change():
+    assert growth.pct_change(13, 10) == 30.0
+    assert growth.pct_change(5, 10) == -50.0
+    assert growth.pct_change(5, 0) is None  # 前期0は新規
+
+
+def test_make_weekly_narrative_basic():
+    t = growth.make_weekly_narrative(
+        {"asset_now": 13, "asset_prev": 10, "recalls_now": 29,
+         "helpful_rate": 100.0, "deprecated_now": 2,
+         "util_pct": 24.5, "never_recalled": 800}
+    )
+    assert "+13件" in t
+    assert "+30.0%" in t      # 13 vs 10
+    assert "想起 29回" in t
+    assert "活用率 24.5%" in t
+
+
+def test_make_weekly_narrative_new_week():
+    t = growth.make_weekly_narrative({"asset_now": 5, "asset_prev": 0})
+    assert "+5件" in t        # 前期0 → 比率なし
+    assert "%" not in t.split("。")[0]  # 先頭文に前週比%は出さない
+
+
 def test_daily_keys_union_desc():
     keys = growth.daily_keys(
         {"2026-06-08": 1, "2026-06-10": 2},
