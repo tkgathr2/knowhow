@@ -134,6 +134,47 @@ def test_make_weekly_narrative_new_week():
     assert "%" not in t.split("。")[0]  # 先頭文に前週比%は出さない
 
 
+def test_attach_daily_growth_basic():
+    # 新しい順（desc）で渡す。期間前の累計=100。
+    entries = [
+        {"date": "2026-06-11", "asset_added": 13},  # 今日
+        {"date": "2026-06-10", "asset_added": 10},  # 前日
+    ]
+    out = growth.attach_daily_growth(entries, base_before=100)
+    # 古い日(6-10): 前日末=100 → 累計110 / 10/100=10.0%
+    # 新しい日(6-11): 前日末=110 → 累計123 / 13/110=11.8%
+    assert out[0]["date"] == "2026-06-11"
+    assert out[0]["asset_cumulative"] == 123
+    assert out[0]["growth_pct"] == 11.8
+    assert out[1]["asset_cumulative"] == 110
+    assert out[1]["growth_pct"] == 10.0
+
+
+def test_attach_daily_growth_zero_base():
+    # 期間前ゼロ → 最初の日は割れない(None)、以降は比率が出る
+    entries = [
+        {"date": "2026-06-10", "asset_added": 5},
+        {"date": "2026-06-09", "asset_added": 4},
+    ]
+    out = growth.attach_daily_growth(entries, base_before=0)
+    assert out[1]["growth_pct"] is None      # 最古日: 前日末0
+    assert out[1]["asset_cumulative"] == 4
+    assert out[0]["growth_pct"] == 125.0     # 5 / 4
+    assert out[0]["asset_cumulative"] == 9
+
+
+def test_latest_daily_growth():
+    entries = [
+        {"date": "2026-06-11", "asset_added": 13, "asset_cumulative": 123, "growth_pct": 11.8},
+        {"date": "2026-06-10", "asset_added": 10, "asset_cumulative": 110, "growth_pct": 10.0},
+    ]
+    l = growth.latest_daily_growth(entries)
+    assert l["date"] == "2026-06-11"
+    assert l["growth_pct"] == 11.8
+    assert l["asset_cumulative"] == 123
+    assert growth.latest_daily_growth([]) is None
+
+
 def test_daily_keys_union_desc():
     keys = growth.daily_keys(
         {"2026-06-08": 1, "2026-06-10": 2},

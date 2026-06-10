@@ -558,13 +558,23 @@ class DailyEntry(BaseModel):
     log_added: int
     deprecated: int
     recalled: int
+    asset_cumulative: int = 0
+    growth_pct: float | None = None
     items: list[DailyItem]
     items_truncated: int
+
+
+class DailyLatest(BaseModel):
+    date: str | None
+    asset_added: int
+    asset_cumulative: int
+    growth_pct: float | None
 
 
 class DailyResponse(BaseModel):
     days: int
     since: str
+    latest: DailyLatest | None = None
     entries: list[DailyEntry]
 
 
@@ -599,6 +609,14 @@ async def get_growth_daily(
     asset_by_day = await _counts(KbChunk.source_type != _LOG_SOURCE)
     log_by_day = await _counts(KbChunk.source_type == _LOG_SOURCE)
     dep_by_day = await _counts(KbChunk.is_deprecated.is_(True))
+
+    # 前日比の分母＝期間より前に既にあった「正味ナレッジ資産」の累計
+    base_where = [KbChunk.created_at < since, KbChunk.source_type != _LOG_SOURCE]
+    if project_key:
+        base_where.append(KbChunk.project_key == project_key)
+    base_before = int(
+        (await db.execute(select(func.count(KbChunk.id)).where(*base_where))).scalar() or 0
+    )
 
     # その日に「使われた（想起された）」数は last_recalled_at で見る
     recalled_day = _day_expr(KbChunk.last_recalled_at)
@@ -657,6 +675,8 @@ async def get_growth_daily(
     entries_raw = growth_calc.assemble_daily(
         days_desc, asset_by_day, log_by_day, dep_by_day, recalled_by_day, items_by_day
     )
+    entries_raw = growth_calc.attach_daily_growth(entries_raw, base_before)
+    latest_raw = growth_calc.latest_daily_growth(entries_raw)
     entries = [
         DailyEntry(
             date=e["date"],
@@ -664,12 +684,19 @@ async def get_growth_daily(
             log_added=e["log_added"],
             deprecated=e["deprecated"],
             recalled=e["recalled"],
+            asset_cumulative=e["asset_cumulative"],
+            growth_pct=e["growth_pct"],
             items=e["items"],
             items_truncated=e["items_truncated"],
         )
         for e in entries_raw
     ]
-    return DailyResponse(days=days, since=since.strftime("%Y-%m-%d"), entries=entries)
+    return DailyResponse(
+        days=days,
+        since=since.strftime("%Y-%m-%d"),
+        latest=DailyLatest(**latest_raw) if latest_raw else None,
+        entries=entries,
+    )
 
 
 # --- ②使う：想起(recall)活用パネル -----------------------------------------

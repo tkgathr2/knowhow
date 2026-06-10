@@ -49,6 +49,7 @@
     <span id="d-30" class="seg" onclick="setDays(30)">30日</span>
     <span id="since" class="text-xs text-gray-400 ml-2"></span>
   </div>
+  <div id="headline" class="hidden mb-5"></div>
   <div id="timeline" class="space-y-6"></div>
   <div id="empty" class="hidden p-10 text-center text-gray-400 text-sm">この期間の記録はありません</div>
 </div>
@@ -93,9 +94,17 @@ function itemCard(it){
   </div>`;
 }
 
+function growthChip(p){
+  if(p==null)return '';
+  const up=p>=0;
+  const cls=up?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-600';
+  return `<span class="chip ${cls}" title="前日終了時点の累計に対する増加率">前日比 ${up?'+':''}${p}%</span>`;
+}
+
 function dayBlock(e){
   const chips=[];
   if(e.asset_added>0)chips.push(`<span class="chip bg-emerald-100 text-emerald-700">学び +${e.asset_added}</span>`);
+  const gc=growthChip(e.growth_pct);if(gc)chips.push(gc);
   if(e.recalled>0)chips.push(`<span class="chip bg-indigo-100 text-indigo-700">想起 ${e.recalled}</span>`);
   if(e.deprecated>0)chips.push(`<span class="chip bg-red-100 text-red-600">非推奨 ${e.deprecated}</span>`);
   if(e.log_added>0)chips.push(`<span class="chip bg-gray-100 text-gray-500">取込ログ +${e.log_added}</span>`);
@@ -110,6 +119,26 @@ function dayBlock(e){
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-2">${body}</div>
   </div>`;
+}
+
+function renderHeadline(l){
+  const box=document.getElementById('headline');
+  if(!l){box.classList.add('hidden');return;}
+  const p=l.growth_pct;
+  const pct = p==null ? '<span class="text-gray-400">—（前日データなし）</span>'
+    : `<span class="${p>=0?'text-emerald-600':'text-red-600'}">${p>=0?'+':''}${p}%</span>`;
+  const rel = l.date ? dateLabel(l.date) : '';
+  box.innerHTML=`<div class="bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-4 flex items-center justify-between flex-wrap gap-2">
+    <div>
+      <div class="text-xs text-gray-500">前日比 成長率（最新日 ${rel}）</div>
+      <div class="text-3xl font-bold mt-0.5">${pct}</div>
+    </div>
+    <div class="text-right text-sm text-gray-500">
+      <div>当日 +${l.asset_added} 件</div>
+      <div class="text-xs text-gray-400">累計 ${Number(l.asset_cumulative||0).toLocaleString('ja-JP')} 件</div>
+    </div>
+  </div>`;
+  box.classList.remove('hidden');
 }
 
 async function loadAuth(){
@@ -127,6 +156,7 @@ async function load(){
   const empty=document.getElementById('empty');
   if(!d){tl.innerHTML='<p class="text-sm text-gray-400">読み込みに失敗しました</p>';return;}
   document.getElementById('since').textContent=d.since+' 〜';
+  renderHeadline(d.latest);
   if(!d.entries.length){tl.innerHTML='';empty.classList.remove('hidden');return;}
   empty.classList.add('hidden');
   tl.innerHTML=d.entries.map(dayBlock).join('');
