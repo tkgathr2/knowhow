@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models import KbChunk
 
 router = APIRouter(tags=["nightly"])
 
@@ -37,6 +38,8 @@ class NightlyRunRequest(BaseModel):
     decay_factor: float = Field(default=0.95, gt=0, le=1)
     min_confidence: float = Field(default=0.1, ge=0, le=1)
     recurrence_window_days: int = Field(default=1, ge=1, le=30)  # 再発判定の対象期間
+    dedup_threshold: float = Field(default=0.95, ge=0.8, le=1)  # 重複統合: 類似度しきい値
+    dedup_max_pairs: int = Field(default=50, ge=0, le=200)  # 重複統合: 1晩の上限ペア数（0=無効）
     dry_run: bool = False
 
 
@@ -48,6 +51,7 @@ class NightlyDigest(BaseModel):
     scored_count: int
     fail_session_count: int
     knowledge_gap_count: int = 0  # recall 0件＝知識が無かった回数（次に学ぶべきこと）
+    merged_duplicates_count: int = 0  # 重複統合した件数（auto-ingestの近接重複の掃除）
     suggestions: list[str] = []   # 提案バジェット（最大3件・ほとんどの日は0が正常）
     note: str
 
@@ -83,6 +87,82 @@ async def _decay(db: AsyncSession, cutoff: datetime, decay_factor: float, min_co
             {**params, "decay_factor": decay_factor},
         )
     return affected
+
+
+def pick_keeper(id_a: int, conf_a: float, id_b: int, conf_b: float) -> tuple[int, int]:
+    """重複ペアのどちらを残すか。信頼度が高い方、同点なら古い方(id小)。戻り値 (keep_id, remove_id)。"""
+    if conf_b > conf_a:
+        return id_b, id_a
+    return id_a, id_b
+
+
+def merge_stats(
+    keep_alpha: float, keep_beta: float, remove_alpha: float, remove_beta: float
+) -> tuple[float, float, float]:
+    """α/βの合算（事前分布1,1の二重計上を除く）と再計算した信頼度を返す。
+    既存 /intelligence/merge-duplicates と同一の数式（単一ソース化のためここに集約）。"""
+    alpha = keep_alpha + remove_alpha - 1.0
+    beta = keep_beta + remove_beta - 1.0
+    return alpha, beta, alpha / (alpha + beta)
+
+
+async def _merge_duplicate_chunks(
+    db: AsyncSession, threshold: float, max_pairs: int, dry_run: bool
+) -> int:
+    """夜間の重複統合: 同一project内の類似度>=threshold のペアを統合（残す側へ実績を合算、
+    片方を非推奨化）。auto-ingest が同時多発で作る近接重複の掃除。embedding 無しや
+    pgvector 不在の環境では安全に0件で返す（degrade-safe）。"""
+    if max_pairs <= 0:
+        return 0
+    q = text("""
+        SELECT id_a, id_b, conf_a, conf_b
+        FROM (
+            SELECT a.id AS id_a, b.id AS id_b,
+                   a.confidence_score AS conf_a, b.confidence_score AS conf_b,
+                   1 - (a.embedding <=> b.embedding) AS similarity
+            FROM kb_chunks a
+            JOIN kb_chunks b ON a.id < b.id
+                 AND a.project_key = b.project_key
+            WHERE a.embedding IS NOT NULL
+                  AND b.embedding IS NOT NULL
+                  AND a.is_deprecated = false
+                  AND b.is_deprecated = false
+        ) sub
+        WHERE similarity >= :threshold
+        ORDER BY similarity DESC
+        LIMIT :lim
+    """)
+    try:
+        rows = (await db.execute(q, {"threshold": threshold, "lim": max_pairs})).all()
+    except Exception:
+        return 0
+
+    merged = 0
+    deprecated: set[int] = set()
+    for row in rows:
+        # 連鎖ペア(a-b, b-c)対策: このパスで既に消した側が絡むペアはスキップ
+        if row.id_a in deprecated or row.id_b in deprecated:
+            continue
+        keep_id, remove_id = pick_keeper(row.id_a, row.conf_a, row.id_b, row.conf_b)
+        if dry_run:
+            deprecated.add(remove_id)
+            merged += 1
+            continue
+        keep = await db.get(KbChunk, keep_id)
+        remove = await db.get(KbChunk, remove_id)
+        if not keep or not remove or keep.is_deprecated or remove.is_deprecated:
+            continue
+        keep.helpful_count += remove.helpful_count
+        keep.unhelpful_count += remove.unhelpful_count
+        keep.recall_count += remove.recall_count
+        keep.alpha, keep.beta, keep.confidence_score = merge_stats(
+            keep.alpha, keep.beta, remove.alpha, remove.beta
+        )
+        keep.tags = list(set((keep.tags or []) + (remove.tags or [])))
+        remove.is_deprecated = True
+        deprecated.add(remove_id)
+        merged += 1
+    return merged
 
 
 async def _recurrence_count(db: AsyncSession, day_start: datetime, window_days: int) -> tuple[int, int]:
@@ -205,10 +285,17 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
         decayed_total = (
             await _decay(db, cutoff, req.decay_factor, req.min_confidence, req.dry_run) if do_decay else 0
         )
+        # 重複統合も decay と同じ「現在状態」操作＝今日分の処理時のみ・1日1回（backfillでは実行しない）
+        merged_total = (
+            await _merge_duplicate_chunks(db, req.dedup_threshold, req.dedup_max_pairs, req.dry_run)
+            if do_decay
+            else 0
+        )
 
         for rd in targets:
             day_start, _ = _day_bounds(rd)
             decayed = decayed_total if rd == today else 0
+            merged = merged_total if rd == today else 0
 
             if not req.dry_run:
                 await db.execute(
@@ -238,13 +325,14 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
             suggestions = suggestions[:3]
 
             note = (
-                f"decay {decayed}件 / 再発(北極星) {recurrence}件 / fail {fail_total}件 / "
+                f"decay {decayed}件 / 重複統合 {merged}件 / 再発(北極星) {recurrence}件 / fail {fail_total}件 / "
                 f"採点 {scored}件 / 知識ギャップ {gap_count}件 / 提案 {len(suggestions)}件"
                 + ("（dry-run）" if req.dry_run else "")
             )
             digest_obj = {
                 "run_date": rd.isoformat(),
                 "decayed_count": decayed,
+                "merged_duplicates_count": merged,
                 "recurrence_count": recurrence,
                 "fail_session_count": fail_total,
                 "scored_count": scored,
@@ -282,6 +370,7 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
                     scored_count=scored,
                     fail_session_count=fail_total,
                     knowledge_gap_count=gap_count,
+                    merged_duplicates_count=merged,
                     suggestions=suggestions,
                     note=note,
                 )
@@ -320,6 +409,7 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
         raise HTTPException(status_code=404, detail="No completed nightly run yet")
     note = ""
     gap_count = 0
+    merged_count = 0
     suggestions: list[str] = []
     try:
         d = r.digest
@@ -328,6 +418,7 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
         d = d or {}
         note = d.get("note", "")
         gap_count = int(d.get("knowledge_gap_count", 0) or 0)
+        merged_count = int(d.get("merged_duplicates_count", 0) or 0)
         suggestions = list(d.get("suggestions", []) or [])
     except Exception:
         pass
@@ -339,6 +430,7 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
         scored_count=r.scored_count,
         fail_session_count=r.fail_session_count,
         knowledge_gap_count=gap_count,
+        merged_duplicates_count=merged_count,
         suggestions=suggestions,
         note=note,
     )
