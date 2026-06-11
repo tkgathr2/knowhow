@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.auth import require_api_key
 from app.middleware import BrowserAuthMiddleware
-from app.routers import admin, auth_oauth, auto_learn, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, metabolize, nightly, search, token_cutter, webhook
+from app.routers import admin, anthropic_cost, auth_oauth, auto_learn, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, metabolize, nightly, search, token_cutter, webhook
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _logger = logging.getLogger(__name__)
@@ -88,6 +88,8 @@ app.include_router(search.router, prefix="/api")     # /search /search/hybrid
 app.include_router(devin.router, prefix="/api")      # /devin/recall=開放, /devin/memorize=EP単位で保護
 # token-cutter: /event=開放(各PCのフックが鍵なしでPOST) / /stats=閲覧保護(middleware)
 app.include_router(token_cutter.router, prefix="/api")
+# anthropic-cost: /receipts=EP単位でKB_API_KEY保護 / /stats=閲覧保護(middleware)
+app.include_router(anthropic_cost.router, prefix="/api")
 # 学びの自動ingest受け口（/auto-learn＝EP単位でKB_API_KEY保護。SessionEndフックが叩く）
 app.include_router(auto_learn.router, prefix="/api")
 
@@ -127,6 +129,11 @@ async def daily_page():
 @app.get("/token-cutter", include_in_schema=False)
 async def token_cutter_page():
     return FileResponse(_STATIC_DIR / "token-cutter.html")
+
+
+@app.get("/anthropic-cost", include_in_schema=False)
+async def anthropic_cost_page():
+    return FileResponse(_STATIC_DIR / "anthropic-cost.html")
 
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
