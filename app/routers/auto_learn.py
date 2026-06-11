@@ -100,7 +100,10 @@ def passes_gate(lesson: dict) -> tuple[bool, str]:
     """品質ゲート: specificity>=4 かつ evidence 非空 かつ not is_generic(summary) → (True, "")。"""
     summary = str(lesson.get("summary", "")).strip()
     evidence = str(lesson.get("evidence", "")).strip()
-    specificity = int(lesson.get("specificity", 0))
+    try:
+        specificity = int(lesson.get("specificity", 0))
+    except (TypeError, ValueError):
+        specificity = 0  # LLMが非数値を返しても500にしない
 
     if specificity < 4:
         return False, f"specificity={specificity} (required>=4)"
@@ -206,7 +209,7 @@ async def auto_learn(
     if not passed_lessons:
         reason_text = "; ".join(skip_reasons) if skip_reasons else "no_lesson"
         skip_hash = "skipped:" + hashlib.sha256(
-            (req.transcript[-2000]).encode("utf-8")
+            (req.transcript[-2000:]).encode("utf-8")
         ).hexdigest()
 
         # 既存 skipped セッションと重複しないよう hash チェック
@@ -321,19 +324,20 @@ async def auto_learn(
         db.add(chunk)
         await db.flush()
 
+        # degrade-safe: embedding失敗してもチャンクは保存（embedding NULL）し、
+        # セッションに failed_embedding を記録するだけで応答は成功のまま（旧挙動踏襲）
         try:
             embedding = await create_embedding(content)
             if embedding is not None:
                 chunk.embedding = embedding
                 chunk.embedding_model = settings.embedding_model
                 chunk.embedding_dimensions = settings.embedding_dim
-            stored_chunks.append(chunk)
         except Exception:
             session.ingest_state = "failed_embedding"
-            await db.commit()
-            return AutoLearnResponse(stored=False, reason="failed_embedding")
+        stored_chunks.append(chunk)
 
-    session.ingest_state = "embedded"
+    if session.ingest_state != "failed_embedding":
+        session.ingest_state = "embedded"
     await db.commit()
 
     first_chunk = stored_chunks[0]
