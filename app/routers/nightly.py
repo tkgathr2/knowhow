@@ -41,6 +41,14 @@ class NightlyRunRequest(BaseModel):
     dedup_threshold: float = Field(default=0.95, ge=0.8, le=1)  # 重複統合: 類似度しきい値
     dedup_max_pairs: int = Field(default=50, ge=0, le=200)  # 重複統合: 1晩の上限ペア数（0=無効）
     dry_run: bool = False
+    # --- Phase S1: 採点パラメータ ---
+    score_window_hours: int = Field(default=6, ge=1, le=48)  # recall後この時間以内のセッションを対象
+    score_alpha_step: float = Field(default=0.2, gt=0, le=10)  # success時の α 加算量
+    score_beta_step: float = Field(default=0.1, gt=0, le=10)   # fail時の β 加算量（冤罪に保守的）
+    score_top_n: int = Field(default=3, ge=1, le=20)           # returned_chunk_ids の先頭N件のみ採点
+    score_daily_cap: float = Field(default=1.0, gt=0, le=10)   # 1チャンク1晩の変動上限
+    score_batch: int = Field(default=500, ge=1, le=5000)       # 1回あたりの処理上限件数
+    score_dry_run: bool = True                                  # 既定dry-run（scored_at を打刻しない）
 
 
 class NightlyDigest(BaseModel):
@@ -54,6 +62,15 @@ class NightlyDigest(BaseModel):
     merged_duplicates_count: int = 0  # 重複統合した件数（auto-ingestの近接重複の掃除）
     suggestions: list[str] = []   # 提案バジェット（最大3件・ほとんどの日は0が正常）
     note: str
+    # --- Phase S1: 採点メトリクス（後方互換: 既存レコードは 0/False で読まれる） ---
+    scoring_processed: int = 0      # 処理した recall ログ件数
+    scoring_matched: int = 0        # セッションと突合できた件数
+    scoring_alpha_applied: int = 0  # α 加算を実施したチャンク件数
+    scoring_beta_applied: int = 0   # β 加算を実施したチャンク件数
+    scoring_dry_run: bool = True    # True=dry-run（scored_at 未打刻）
+    # --- auto-ingest 品質メトリクス ---
+    auto_learn_stored: int = 0      # その日 auto-ingest で取り込まれた件数
+    auto_learn_skipped: int = 0     # その日 auto-ingest でスキップされた件数
 
 
 class NightlyRunResponse(BaseModel):
@@ -239,6 +256,201 @@ async def _knowledge_gaps(db: AsyncSession, day_start: datetime) -> tuple[int, l
     return gap_count, samples
 
 
+# ---------------------------------------------------------------------------
+# Phase S1: 採点純粋関数（DB非依存・テスト可能）
+# ---------------------------------------------------------------------------
+
+def attribute_outcome(
+    recall_created: datetime,
+    sessions: list[tuple[datetime, str]],
+    window_hours: int,
+) -> str | None:
+    """recall ログの作成時刻から window_hours 以内で最初に完了したセッションの outcome を返す。
+    sessions は (created_at, status) のリストで時刻昇順を想定。
+    該当なし・partial はどちらも None を返す（α/β の変更なし）。"""
+    window_end = recall_created + timedelta(hours=window_hours)
+    for created_at, status in sessions:
+        if created_at < recall_created:
+            continue
+        if created_at >= window_end:
+            break
+        if status == "success":
+            return "success"
+        if status == "fail":
+            return "fail"
+        # partial / その他 → スキップして次を見る
+    return None
+
+
+def clamp_delta(current_total: float, step: float, cap: float) -> float:
+    """current_total は今晩のこのチャンクへの累計変動量。
+    cap を超えない範囲で step を加算した後の累計を返す。
+    戻り値は「今回の実際の加算量」（0 以上）。"""
+    remaining = max(0.0, cap - current_total)
+    return min(step, remaining)
+
+
+async def _score_recalls(
+    db: AsyncSession,
+    req: "NightlyRunRequest",
+) -> tuple[int, int, int, int]:
+    """採点ステップ本体。
+    戻り値: (processed, matched, alpha_applied, beta_applied)
+    req.score_dry_run=True のときは scored_at を打刻しない（DB変更なし）。
+    """
+    cutoff = datetime.now(UTC) - timedelta(hours=req.score_window_hours)
+
+    # 未採点ログを古い順に score_batch 件取得
+    rows = (await db.execute(
+        text(
+            "SELECT id, project_key, returned_chunk_ids, created_at "
+            "FROM kb_recall_log "
+            "WHERE scored_at IS NULL AND created_at < :cutoff "
+            "ORDER BY created_at ASC "
+            "LIMIT :lim"
+        ),
+        {"cutoff": cutoff, "lim": req.score_batch},
+    )).all()
+
+    processed = len(rows)
+    matched = 0
+    alpha_applied = 0
+    beta_applied = 0
+
+    # チャンク毎の晩内累計変動量（cap 管理用）
+    chunk_delta: dict[int, float] = {}
+    # 打刻対象 log id
+    scored_ids: list[int] = []
+
+    for row in rows:
+        log_id: int = row.id
+        project_key: str = row.project_key
+        chunk_ids: list[int] = row.returned_chunk_ids or []
+        recall_ts: datetime = row.created_at
+
+        # タイムゾーン補完（DB値がnaiveの場合）
+        if recall_ts.tzinfo is None:
+            recall_ts = recall_ts.replace(tzinfo=UTC)
+
+        window_end = recall_ts + timedelta(hours=req.score_window_hours)
+
+        # 同一 project_key のセッションを時刻昇順で取得（window 内）
+        sess_rows = (await db.execute(
+            text(
+                "SELECT created_at, status FROM kb_sessions "
+                "WHERE project_key = :pk "
+                "  AND created_at >= :ts_start "
+                "  AND created_at < :ts_end "
+                "ORDER BY created_at ASC "
+                "LIMIT 50"
+            ),
+            {"pk": project_key, "ts_start": recall_ts, "ts_end": window_end},
+        )).all()
+
+        sessions_list: list[tuple[datetime, str]] = [
+            (r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=UTC), r.status)
+            for r in sess_rows
+        ]
+
+        outcome = attribute_outcome(recall_ts, sessions_list, req.score_window_hours)
+
+        if outcome is None:
+            # partial または該当なし → scored_at は打刻しない（再試行対象のまま）
+            continue
+
+        matched += 1
+        scored_ids.append(log_id)
+
+        # 先頭 top_n チャンクのみ採点
+        target_chunk_ids = chunk_ids[: req.score_top_n]
+
+        for chunk_id in target_chunk_ids:
+            # is_deprecated チェック
+            dep_row = (await db.execute(
+                text("SELECT alpha, beta, is_deprecated FROM kb_chunks WHERE id = :cid"),
+                {"cid": chunk_id},
+            )).first()
+            if not dep_row or dep_row.is_deprecated:
+                continue
+
+            cur_alpha: float = dep_row.alpha
+            cur_beta: float = dep_row.beta
+
+            if outcome == "success":
+                delta = clamp_delta(chunk_delta.get(chunk_id, 0.0), req.score_alpha_step, req.score_daily_cap)
+                if delta <= 0:
+                    continue
+                chunk_delta[chunk_id] = chunk_delta.get(chunk_id, 0.0) + delta
+                new_alpha = min(cur_alpha + delta, 100.0)
+                new_beta = cur_beta
+                alpha_applied += 1
+            else:  # fail
+                delta = clamp_delta(chunk_delta.get(chunk_id, 0.0), req.score_beta_step, req.score_daily_cap)
+                if delta <= 0:
+                    continue
+                chunk_delta[chunk_id] = chunk_delta.get(chunk_id, 0.0) + delta
+                new_alpha = cur_alpha
+                new_beta = min(cur_beta + delta, 100.0)
+                beta_applied += 1
+
+            if not req.score_dry_run:
+                new_conf = new_alpha / (new_alpha + new_beta)
+                await db.execute(
+                    text(
+                        "UPDATE kb_chunks SET alpha=:a, beta=:b, confidence_score=:c "
+                        "WHERE id=:cid AND is_deprecated=false"
+                    ),
+                    {"a": new_alpha, "b": new_beta, "c": new_conf, "cid": chunk_id},
+                )
+
+    # scored_at 打刻（score_dry_run=False のときのみ）
+    if not req.score_dry_run and scored_ids:
+        await db.execute(
+            text(
+                "UPDATE kb_recall_log SET scored_at = now() "
+                "WHERE id = ANY(:ids)"
+            ),
+            {"ids": scored_ids},
+        )
+
+    return processed, matched, alpha_applied, beta_applied
+
+
+async def _auto_learn_metrics(db: AsyncSession, day_start: datetime) -> tuple[int, int]:
+    """auto-ingest 品質メトリクス: その日の kb_sessions のうち tags に 'auto-ingest' を含むものを集計。
+    戻り値: (auto_learn_stored, auto_learn_skipped)
+    skipped は ingest_state='skipped' のもの（列がなければ0）。"""
+    _, day_end = _day_bounds(day_start.date())
+    params = {"ds": day_start, "de": day_end}
+
+    stored_row = await db.execute(
+        text(
+            "SELECT count(*) FROM kb_sessions "
+            "WHERE created_at >= :ds AND created_at < :de "
+            "  AND tags @> ARRAY['auto-ingest']::text[] "
+            "  AND coalesce(ingest_state, '') <> 'skipped'"
+        ),
+        params,
+    )
+    stored = int(stored_row.scalar() or 0)
+
+    try:
+        skipped_row = await db.execute(
+            text(
+                "SELECT count(*) FROM kb_sessions "
+                "WHERE created_at >= :ds AND created_at < :de "
+                "  AND tags @> ARRAY['auto-ingest']::text[] "
+                "  AND ingest_state = 'skipped'"
+            ),
+            params,
+        )
+        skipped = int(skipped_row.scalar() or 0)
+    except Exception:
+        skipped = 0
+
+    return stored, skipped
+
+
 async def _dates_to_process(db: AsyncSession, today: date, catchup_days: int) -> list[date]:
     """過去 catchup_days 日（今日含む）で status='done' でない日を、古い順に返す。"""
     start = today - timedelta(days=catchup_days - 1)
@@ -310,6 +522,13 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
             recurrence, fail_total = await _recurrence_count(db, day_start, req.recurrence_window_days)
             scored = await _scored_count(db, day_start)
             gap_count, gap_samples = await _knowledge_gaps(db, day_start)
+            auto_stored, auto_skipped = await _auto_learn_metrics(db, day_start)
+
+            # 採点ステップ: targets が空でない（今日分を処理している）夜のみ実行。
+            # advisory lock 配下で1回のみ（ループ外の do_decay フラグを流用）。
+            sc_processed = sc_matched = sc_alpha = sc_beta = 0
+            if do_decay and rd == today:
+                sc_processed, sc_matched, sc_alpha, sc_beta = await _score_recalls(db, req)
 
             # 提案バジェット（最大3件・ほとんどの日は0が正常）。気づき→報連相の核。
             suggestions: list[str] = []
@@ -327,6 +546,8 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
             note = (
                 f"decay {decayed}件 / 重複統合 {merged}件 / 再発(北極星) {recurrence}件 / fail {fail_total}件 / "
                 f"採点 {scored}件 / 知識ギャップ {gap_count}件 / 提案 {len(suggestions)}件"
+                + (f" / 採点S1 processed={sc_processed} matched={sc_matched} α={sc_alpha} β={sc_beta}"
+                   f"{'(dry)' if req.score_dry_run else ''}" if sc_processed > 0 else "")
                 + ("（dry-run）" if req.dry_run else "")
             )
             digest_obj = {
@@ -340,6 +561,13 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
                 "knowledge_gap_samples": gap_samples,
                 "suggestions": suggestions,
                 "north_star": "recurrence_count（再発した既知ミス件数・低いほど良い）",
+                "scoring_processed": sc_processed,
+                "scoring_matched": sc_matched,
+                "scoring_alpha_applied": sc_alpha,
+                "scoring_beta_applied": sc_beta,
+                "scoring_dry_run": req.score_dry_run,
+                "auto_learn_stored": auto_stored,
+                "auto_learn_skipped": auto_skipped,
                 "note": note,
                 "generated_at": datetime.now(UTC).isoformat(),
             }
@@ -373,6 +601,13 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
                     merged_duplicates_count=merged,
                     suggestions=suggestions,
                     note=note,
+                    scoring_processed=sc_processed,
+                    scoring_matched=sc_matched,
+                    scoring_alpha_applied=sc_alpha,
+                    scoring_beta_applied=sc_beta,
+                    scoring_dry_run=req.score_dry_run,
+                    auto_learn_stored=auto_stored,
+                    auto_learn_skipped=auto_skipped,
                 )
             )
 
@@ -411,6 +646,9 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
     gap_count = 0
     merged_count = 0
     suggestions: list[str] = []
+    sc_processed = sc_matched = sc_alpha = sc_beta = 0
+    sc_dry_run = True
+    auto_stored = auto_skipped = 0
     try:
         d = r.digest
         if isinstance(d, str):
@@ -420,6 +658,13 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
         gap_count = int(d.get("knowledge_gap_count", 0) or 0)
         merged_count = int(d.get("merged_duplicates_count", 0) or 0)
         suggestions = list(d.get("suggestions", []) or [])
+        sc_processed = int(d.get("scoring_processed", 0) or 0)
+        sc_matched = int(d.get("scoring_matched", 0) or 0)
+        sc_alpha = int(d.get("scoring_alpha_applied", 0) or 0)
+        sc_beta = int(d.get("scoring_beta_applied", 0) or 0)
+        sc_dry_run = bool(d.get("scoring_dry_run", True))
+        auto_stored = int(d.get("auto_learn_stored", 0) or 0)
+        auto_skipped = int(d.get("auto_learn_skipped", 0) or 0)
     except Exception:
         pass
     return NightlyDigest(
@@ -433,4 +678,11 @@ async def nightly_latest(db: AsyncSession = Depends(get_db)) -> NightlyDigest:
         merged_duplicates_count=merged_count,
         suggestions=suggestions,
         note=note,
+        scoring_processed=sc_processed,
+        scoring_matched=sc_matched,
+        scoring_alpha_applied=sc_alpha,
+        scoring_beta_applied=sc_beta,
+        scoring_dry_run=sc_dry_run,
+        auto_learn_stored=auto_stored,
+        auto_learn_skipped=auto_skipped,
     )
