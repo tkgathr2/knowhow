@@ -3,6 +3,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -202,6 +203,27 @@ class KbTokenCutterEvent(Base):
 
     __table_args__ = (
         Index("ix_tc_events_occurred", "occurred_at"),
+    )
+
+
+class KbAnthropicReceipt(Base):
+    __tablename__ = "kb_anthropic_receipts"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    receipt_no = Column(Text, nullable=False, unique=True)
+    receipt_date = Column(Date, nullable=False)
+    description = Column(Text, nullable=False)
+    kind = Column(String, nullable=False)
+    subtotal_usd = Column(Float, nullable=False)
+    tax_usd = Column(Float, nullable=False, default=0)
+    total_usd = Column(Float, nullable=False)
+    usdjpy = Column(Float)
+    total_jpy = Column(Integer)
+    meta = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_anthropic_receipts_date", "receipt_date"),
     )
 
 
