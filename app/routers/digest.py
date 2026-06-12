@@ -84,14 +84,15 @@ async def _day_data(db: AsyncSession, d: date) -> tuple[dict, list[dict]]:
         or 0
     )
 
+    # SQL側で文字列を切らない（left()はバイト切りで22021を起こす・dashboard参照）
     rows = await db.execute(
-        select(KbChunk.project_key, KbChunk.tags, func.left(KbChunk.content, 200).label("content"))
+        select(KbChunk.project_key, KbChunk.tags, KbChunk.content)
         .where(*in_day, KbChunk.source_type != _LOG_SOURCE)
         .order_by(KbChunk.created_at.desc())
         .limit(200)
     )
     items = [
-        {"project_key": r.project_key, "tags": r.tags or [], "content": r.content or ""}
+        {"project_key": r.project_key, "tags": r.tags or [], "content": (r.content or "")[:200]}
         for r in rows
     ]
     stats = {

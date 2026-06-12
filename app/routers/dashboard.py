@@ -886,11 +886,14 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
     since = now - timedelta(days=days)
     prev_since = now - timedelta(days=days * 2)
 
+    # NOTE: SQL側の left()/substr() は使わない。本DBでは文字関数がバイト単位で
+    # 切れて不正UTF-8を生成し22021になる（2026-06-13 本番事故で実証）。
+    # 全文を取得して Python 側で切る（/growth/daily と同じ安全パターン）。
     rows = await db.execute(
         select(
             KbChunk.project_key,
             KbChunk.tags,
-            func.left(KbChunk.content, 200).label("content_head"),
+            KbChunk.content,
             KbChunk.created_at,
             KbChunk.recall_count,
         ).where(KbChunk.source_type != _LOG_SOURCE, KbChunk.is_deprecated.is_(False))
@@ -899,7 +902,7 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
         {
             "project_key": r.project_key,
             "tags": r.tags or [],
-            "content_head": r.content_head or "",
+            "content_head": (r.content or "")[:200],
             "created_at": r.created_at.isoformat() if r.created_at else "",
             "recall_count": r.recall_count or 0,
         }
