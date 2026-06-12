@@ -394,7 +394,9 @@ async def _id_is_broken(db: AsyncSession, chunk_id: int) -> bool:
     try:
         await db.execute(
             text(
-                "SELECT length(content) + coalesce(length(array_to_string(tags,'')),0) "
+                # 本番で実際に22021を起こした式（left）をそのままプローブに使う
+                "SELECT octet_length(left(content, 200)) + length(content) "
+                "+ coalesce(octet_length(left(array_to_string(tags,''), 200)), 0) "
                 "FROM kb_chunks WHERE id = :i"
             ),
             {"i": chunk_id},
@@ -411,7 +413,8 @@ async def _range_is_broken(db: AsyncSession, lo: int, hi: int) -> bool:
     try:
         await db.execute(
             text(
-                "SELECT sum(length(content) + coalesce(length(array_to_string(tags,'')),0)) "
+                "SELECT sum(octet_length(left(content, 200)) + length(content) "
+                "+ coalesce(octet_length(left(array_to_string(tags,''), 200)), 0)) "
                 "FROM kb_chunks WHERE id BETWEEN :lo AND :hi"
             ),
             {"lo": lo, "hi": hi},
