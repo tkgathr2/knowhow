@@ -59,6 +59,7 @@
 <script>
 const API = window.location.origin;
 let days = 14;
+let digests = {};  // date -> {headline, body, is_final}
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
@@ -103,21 +104,36 @@ function growthChip(p){
 
 function dayBlock(e){
   const chips=[];
-  if(e.asset_added>0)chips.push(`<span class="chip bg-emerald-100 text-emerald-700">学び +${e.asset_added}</span>`);
+  if(e.asset_added>0)chips.push(`<span class="chip bg-emerald-100 text-emerald-700" title="この日に新しくたまった知恵の数">新しい知恵 +${e.asset_added}</span>`);
   const gc=growthChip(e.growth_pct);if(gc)chips.push(gc);
-  if(e.recalled>0)chips.push(`<span class="chip bg-indigo-100 text-indigo-700">想起 ${e.recalled}</span>`);
-  if(e.deprecated>0)chips.push(`<span class="chip bg-red-100 text-red-600">非推奨 ${e.deprecated}</span>`);
-  if(e.log_added>0)chips.push(`<span class="chip bg-gray-100 text-gray-500">取込ログ +${e.log_added}</span>`);
+  if(e.recalled>0)chips.push(`<span class="chip bg-indigo-100 text-indigo-700" title="過去の知恵がAIに思い出されて役立った数">使われた知恵 ${e.recalled}</span>`);
+  if(e.deprecated>0)chips.push(`<span class="chip bg-red-100 text-red-600" title="古くなって引退させた知識の数">整理 ${e.deprecated}</span>`);
+  if(e.log_added>0)chips.push(`<span class="chip bg-gray-100 text-gray-500" title="システムが自動でメモした作業履歴の数">自動記録 +${e.log_added}</span>`);
+
+  const dg = digests[e.date];
+  const digestBox = dg ? `<div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 m-1.5">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-base">📝</span>
+        <span class="font-bold text-amber-900 text-sm">${esc(dg.headline)}</span>
+        ${dg.is_final?'':'<span class="text-[10px] text-amber-500 border border-amber-300 rounded px-1.5 py-0.5">本日進行中・暫定</span>'}
+      </div>
+      <div class="text-sm text-amber-900 leading-relaxed">${esc(dg.body)}</div>
+    </div>` : '';
+
   const items=(e.items||[]).map(itemCard).join('');
   const more=e.items_truncated>0?`<div class="px-3 py-2 text-xs text-gray-400">…ほか ${e.items_truncated} 件</div>`:'';
-  const body=items?`<div class="divide-y divide-gray-50 mt-2">${items}${more}</div>`
-    :'<div class="px-3 py-2 text-xs text-gray-400">この日の新規ナレッジ資産はありません（活動のみ）</div>';
+  const itemCount=(e.items||[]).length+(e.items_truncated||0);
+  const body=items?`<details class="m-1.5">
+      <summary class="cursor-pointer select-none text-xs text-indigo-600 hover:text-indigo-800 px-3 py-2">▼ 1件ずつ見る（${itemCount}件）</summary>
+      <div class="divide-y divide-gray-50 mt-1">${items}${more}</div>
+    </details>`
+    :'<div class="px-3 py-2 text-xs text-gray-400">この日の新しい知恵はありません（活動のみ）</div>';
   return `<div class="fade-in">
     <div class="flex items-center gap-3 mb-2">
       <h2 class="text-sm font-semibold text-gray-700">${dateLabel(e.date)}</h2>
       <div class="flex items-center gap-1.5 flex-wrap">${chips.join('')}</div>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-2">${body}</div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-1">${digestBox}${body}</div>
   </div>`;
 }
 
@@ -130,12 +146,12 @@ function renderHeadline(l){
   const rel = l.date ? dateLabel(l.date) : '';
   box.innerHTML=`<div class="bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-4 flex items-center justify-between flex-wrap gap-2">
     <div>
-      <div class="text-xs text-gray-500">前日比 成長率（最新日 ${rel}）</div>
+      <div class="text-xs text-gray-500">知恵が増えるスピード（前の日とくらべて／最新日 ${rel}）</div>
       <div class="text-3xl font-bold mt-0.5">${pct}</div>
     </div>
     <div class="text-right text-sm text-gray-500">
-      <div>当日 +${l.asset_added} 件</div>
-      <div class="text-xs text-gray-400">累計 ${Number(l.asset_cumulative||0).toLocaleString('ja-JP')} 件</div>
+      <div>この日に増えた知恵 +${l.asset_added} 件</div>
+      <div class="text-xs text-gray-400">これまでにたまった知恵 ${Number(l.asset_cumulative||0).toLocaleString('ja-JP')} 件</div>
     </div>
   </div>`;
   box.classList.remove('hidden');
@@ -151,9 +167,15 @@ async function loadAuth(){
 
 async function load(){
   loadAuth();
-  const d=await api('/api/growth/daily?days='+days);
   const tl=document.getElementById('timeline');
   const empty=document.getElementById('empty');
+  tl.innerHTML='<p class="text-sm text-gray-400">読み込み中…（初回はその日のまとめを作るため少し時間がかかります）</p>';
+  const [d,dg]=await Promise.all([
+    api('/api/growth/daily?days='+days),
+    api('/api/digest/daily?days='+days),
+  ]);
+  digests={};
+  if(dg&&dg.entries)dg.entries.forEach(x=>{digests[x.date]=x;});
   if(!d){tl.innerHTML='<p class="text-sm text-gray-400">読み込みに失敗しました</p>';return;}
   document.getElementById('since').textContent=d.since+' 〜';
   renderHeadline(d.latest);

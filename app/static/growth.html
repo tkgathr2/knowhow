@@ -56,8 +56,8 @@
   <div class="flex flex-wrap items-center gap-3">
     <div class="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1">
       <span id="s-all" class="seg active" onclick="setSeries('all')">全体</span>
-      <span id="s-asset" class="seg" onclick="setSeries('asset')">ナレッジ資産</span>
-      <span id="s-log" class="seg" onclick="setSeries('log')">取込ログ</span>
+      <span id="s-asset" class="seg" onclick="setSeries('asset')">知恵（正味）</span>
+      <span id="s-log" class="seg" onclick="setSeries('log')">自動メモ</span>
     </div>
     <div class="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1">
       <span id="b-month" class="seg active" onclick="setBucket('month')">月次</span>
@@ -70,44 +70,52 @@
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
     <div class="flex items-baseline gap-2 mb-1 flex-wrap">
-      <h2 class="font-semibold text-sm text-gray-700">推定削減コスト（日次・コストカッターくん）</h2>
+      <h2 class="font-semibold text-sm text-gray-700">部長別の成長（この30日）</h2>
+      <span class="text-xs text-gray-400">どの部長の領域の知恵がどれだけ増えたか</span>
+    </div>
+    <div id="buchoCards" class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3"><p class="text-xs text-gray-400">読み込み中…</p></div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+    <div class="flex items-baseline gap-2 mb-1 flex-wrap">
+      <h2 class="font-semibold text-sm text-gray-700">AIのムダづかい防止で節約できたお金（日別）</h2>
       <span id="costSummary" class="text-xs text-emerald-600 font-semibold"></span>
     </div>
-    <p class="text-xs text-gray-400 mb-3">棒=その日に避けられた推定コスト（円・上限見積り）。重い手を着手前に検知して節約した分。<a href="/token-cutter" class="text-indigo-500 underline">内訳→</a></p>
+    <p class="text-xs text-gray-400 mb-3">棒グラフ＝その日にAIの無駄な処理を未然に止めて節約できた金額（円・見積り）。<a href="/token-cutter" class="text-indigo-500 underline">内訳→</a></p>
     <div style="position:relative;height:200px;"><canvas id="costChart" role="img" aria-label="日次の推定削減コスト（円）"></canvas></div>
   </div>
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
-    <h2 class="font-semibold text-sm text-gray-700 mb-1">累計ナレッジの伸び</h2>
-    <p class="text-xs text-gray-400 mb-3">選択中の系列の累計推移</p>
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">知恵の雪だるま（積み上がり）</h2>
+    <p class="text-xs text-gray-400 mb-3">会社の知恵が雪だるま式に増えていく様子。右肩上がり＝順調</p>
     <div style="position:relative;height:240px;"><canvas id="cumChart" role="img" aria-label="累計ナレッジ件数の推移"></canvas></div>
   </div>
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
     <div class="flex items-baseline gap-2 mb-1">
-      <h2 class="font-semibold text-sm text-gray-700">期間別の純増と成長率</h2>
-      <span class="text-xs text-gray-400">棒=追加件数 / 折線=前期比% / 薄棒=今期の着地予測</span>
+      <h2 class="font-semibold text-sm text-gray-700">毎月どれだけ知恵が増えたか</h2>
+      <span class="text-xs text-gray-400">棒＝増えた件数／折れ線＝伸び率／薄い棒＝今月このペースで行った場合の見込み</span>
     </div>
     <div style="position:relative;height:240px;margin-top:8px;"><canvas id="momChart" role="img" aria-label="期間別の純増件数と前期比成長率"></canvas></div>
   </div>
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
-      <h2 class="font-semibold text-sm text-gray-700 mb-3">取込元（source_type）の内訳</h2>
+      <h2 class="font-semibold text-sm text-gray-700 mb-3">知恵がどこから来たか</h2>
       <div id="srcBars" class="space-y-2"></div>
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
-      <h2 class="font-semibold text-sm text-gray-700 mb-3">新陳代謝（期間別の非推奨化）</h2>
+      <h2 class="font-semibold text-sm text-gray-700 mb-3">古い知識の整理（月別）</h2>
       <div style="position:relative;height:180px;"><canvas id="depChart" role="img" aria-label="期間別の非推奨化件数"></canvas></div>
     </div>
   </div>
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
     <div class="flex items-baseline gap-2 mb-1">
-      <h2 class="font-semibold text-sm text-gray-700">活用（想起 recall）</h2>
+      <h2 class="font-semibold text-sm text-gray-700">よく使われている知恵ベスト</h2>
       <span id="usageUtil" class="text-xs text-gray-400"></span>
     </div>
-    <p class="text-xs text-gray-400 mb-3">よく使われた学び＝生きている知識。未活用は埋もれた資産。</p>
+    <p class="text-xs text-gray-400 mb-3">AIが何度も思い出して使っている知恵＝今いちばん役立っている知識。</p>
     <div id="topRecalled" class="space-y-2"></div>
   </div>
 
@@ -142,18 +150,16 @@ function renderCards(d){
   const t=d.totals;
   const cur=d.current_period;
   const last=d.points.length?d.points[d.points.length-1]:null;
-  const growthSub=last&&last.growth_pct!=null?`<span class="text-emerald-600">${pct(last.growth_pct)} 前期比</span>`:'評価対象外';
-  const projSub=cur?`着地 約${fmt(cur.projected_added)}件 / ${pct(cur.projected_growth_pct)}`:'進行中の期なし';
-  const helpfulSub=t.helpful_rate==null?'未評価':`有用度 ${t.helpful_rate}%`;
+  const projSub=cur?`このペースなら今月 約${fmt(cur.projected_added)}件 増える見込み`:'進行中の期なし';
   document.getElementById('cards').innerHTML=[
-    card('ナレッジ資産', fmt(t.asset)+'<span class="text-xs text-gray-400"> 件</span>', last?`今期 +${fmt(last.added)}（選択系列）`:'', 'text-emerald-600'),
-    card('取込ログ（自動）', fmt(t.log)+'<span class="text-xs text-gray-400"> 件</span>', 'GitHub push/pr 等', 'text-gray-400'),
-    card('今期の成長率', last&&last.growth_pct!=null?pct(last.growth_pct):'—', projSub, 'text-indigo-500'),
-    card('想起（活用）回数', fmt(t.recall_total), `使われた資産 ${fmt(t.recalled_chunks)}件`, 'text-gray-400'),
-    card('平均信頼度', t.avg_confidence==null?'—':t.avg_confidence+'%', '資産の確からしさ', 'text-gray-400'),
-    card('有用度', t.helpful_rate==null?'未評価':t.helpful_rate+'%', helpfulSub, 'text-gray-400'),
-    card('ベクトル化率', t.vectorized_pct+'%', `${fmt(t.embedded)} / ${fmt(t.chunks)}`, 'text-gray-400'),
-    card('新陳代謝', fmt(t.deprecated)+'<span class="text-xs text-gray-400"> 件</span>', '非推奨で沈んだ知識', 'text-gray-400'),
+    card('たまった会社の知恵', fmt(t.asset)+'<span class="text-xs text-gray-400"> 件</span>', last?`今月 +${fmt(last.added)}件 増加中`:'仕事から学んだ知識の数', 'text-emerald-600'),
+    card('自動で記録した作業メモ', fmt(t.log)+'<span class="text-xs text-gray-400"> 件</span>', 'システムが勝手に残した作業履歴', 'text-gray-400'),
+    card('知恵が増えるスピード', last&&last.growth_pct!=null?pct(last.growth_pct):'—', projSub, 'text-indigo-500'),
+    card('知恵が役立った回数', fmt(t.recall_total), `AIが過去の知恵を思い出して使った回数（${fmt(t.recalled_chunks)}件が活躍）`, 'text-gray-400'),
+    card('知識の確かさ', t.avg_confidence==null?'—':t.avg_confidence+'%', 'どれくらい裏付けのある知識か', 'text-gray-400'),
+    card('役に立った割合', t.helpful_rate==null?'未評価':t.helpful_rate+'%', '使われた知恵のうち「役立った」の割合', 'text-gray-400'),
+    card('すぐ取り出せる状態', t.vectorized_pct+'%', 'AIが一瞬で検索できる形になっている割合', 'text-gray-400'),
+    card('古い知識の整理', fmt(t.deprecated)+'<span class="text-xs text-gray-400"> 件</span>', '古くなって引退させた知識（健全な代謝）', 'text-gray-400'),
   ].join('');
 }
 
@@ -231,15 +237,15 @@ async function loadCost(){
   if(cardsEl){
     const ex=document.getElementById('cost-kpi');if(ex)ex.remove();
     cardsEl.insertAdjacentHTML('afterbegin',`<div id="cost-kpi" class="bg-emerald-50 rounded-xl shadow-sm border border-emerald-200 p-4 fade-in">
-      <div class="text-xs text-emerald-700">推定削減コスト（30日）</div>
+      <div class="text-xs text-emerald-700">節約できたお金（30日）</div>
       <div class="text-2xl font-bold text-emerald-700 mt-0.5">${esc(mn.jpy_human||'0円')}</div>
-      <div class="text-xs text-emerald-600 mt-0.5">≈ $${fmt(mn.usd||0)}・コストカッター</div>
+      <div class="text-xs text-emerald-600 mt-0.5">≈ $${fmt(mn.usd||0)}・AIのムダづかい防止</div>
     </div>`);
   }
   if(costChart)costChart.destroy();
   costChart=new Chart(document.getElementById('costChart'),{
     type:'bar',
-    data:{labels,datasets:[{label:'推定削減コスト(円)',data:yen,backgroundColor:'#5DCAA5',borderColor:'#0F6E56',borderWidth:1}]},
+    data:{labels,datasets:[{label:'節約できたお金(円)',data:yen,backgroundColor:'#5DCAA5',borderColor:'#0F6E56',borderWidth:1}]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'¥'+Number(c.raw).toLocaleString('ja-JP')}}},
       scales:{y:{beginAtZero:true,ticks:{callback:v=>'¥'+Number(v).toLocaleString('ja-JP')}}}}
@@ -253,6 +259,37 @@ async function loadAuth(){
     document.getElementById('auth-box').classList.remove('hidden');
     document.getElementById('auth-box').classList.add('flex');
   }
+}
+
+async function loadBucho(){
+  const d=await api('/api/stats/bucho?days=30');
+  const box=document.getElementById('buchoCards');
+  if(!d||!d.buchos){box.innerHTML='<p class="text-xs text-gray-400">データなし</p>';return;}
+  const maxAdded=Math.max(1,...d.buchos.map(b=>b.added));
+  box.innerHTML=d.buchos.map(b=>{
+    const g=b.growth_pct;
+    const trend=g==null?'':(g>=0?`<span class="text-emerald-600 text-xs font-semibold">↑ 前の30日より+${g}%</span>`:`<span class="text-red-500 text-xs font-semibold">↓ 前の30日より${g}%</span>`);
+    const bar=Math.round(b.added/maxAdded*100);
+    return `<div class="border border-gray-200 rounded-xl p-4 hover:shadow transition">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-2xl">${b.emoji}</span>
+        <div class="min-w-0">
+          <div class="font-bold text-sm text-gray-900 truncate">${esc(b.name)}</div>
+          <div class="text-[10px] text-gray-400 truncate">${esc(b.title)}・${esc(b.domain)}</div>
+        </div>
+      </div>
+      <div class="mt-2 flex items-baseline gap-1">
+        <span class="text-2xl font-bold" style="color:${b.color}">+${fmt(b.added)}</span>
+        <span class="text-xs text-gray-400">件の知恵（30日）</span>
+      </div>
+      <div class="h-1.5 bg-gray-100 rounded mt-1.5 overflow-hidden"><span style="display:block;height:100%;width:${bar}%;background:${b.color};border-radius:4px;"></span></div>
+      <div class="flex justify-between mt-1.5 text-[11px] text-gray-500">
+        <span>累計 ${fmt(b.total)}件</span>
+        <span title="この部長の知恵がAIに使われた回数">活躍 ${fmt(b.recalls)}回</span>
+      </div>
+      ${trend?`<div class="mt-1">${trend}</div>`:''}
+    </div>`;
+  }).join('');
 }
 
 async function loadUsage(){
@@ -283,6 +320,7 @@ async function load(){
   renderMom(d);
   renderSrc(d);
   renderDep(d);
+  loadBucho();
   loadUsage();
   loadCost();
 }

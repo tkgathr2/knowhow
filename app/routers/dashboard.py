@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, distinct, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import bucho as bucho_calc
 from app import growth as growth_calc
 from app.database import get_db
 from app.models import KbChunk, KbProject, KbSession
@@ -849,4 +850,64 @@ async def get_weekly_summary(db: AsyncSession = Depends(get_db)) -> WeeklySummar
         utilization_pct=util,
         never_recalled=never,
         narrative=narrative,
+    )
+
+
+# --- 部長別の成長（5部長制・社長指示 2026/06/13） -----------------------------
+class BuchoCard(BaseModel):
+    key: str
+    name: str
+    title: str
+    emoji: str
+    domain: str
+    color: str
+    total: int
+    added: int
+    added_prev: int
+    growth_pct: float | None
+    recalls: int
+
+
+class BuchoResponse(BaseModel):
+    days: int
+    since: str
+    buchos: list[BuchoCard]
+
+
+@router.get("/stats/bucho", response_model=BuchoResponse)
+async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) -> BuchoResponse:
+    """ナレッジ資産を5部長＋全社共通に分類して、部長ごとの伸びを返す。
+
+    分類は project_key の明示マップ＋タグ/本文キーワード（app/bucho.py）。
+    取込ログ(webhook)と非推奨は数えない＝「正味の知恵」だけを部長の成長とみなす。
+    """
+    days = max(1, min(days, 365))
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    prev_since = now - timedelta(days=days * 2)
+
+    rows = await db.execute(
+        select(
+            KbChunk.project_key,
+            KbChunk.tags,
+            func.left(KbChunk.content, 200).label("content_head"),
+            KbChunk.created_at,
+            KbChunk.recall_count,
+        ).where(KbChunk.source_type != _LOG_SOURCE, KbChunk.is_deprecated.is_(False))
+    )
+    data = [
+        {
+            "project_key": r.project_key,
+            "tags": r.tags or [],
+            "content_head": r.content_head or "",
+            "created_at": r.created_at.isoformat() if r.created_at else "",
+            "recall_count": r.recall_count or 0,
+        }
+        for r in rows
+    ]
+    buchos = bucho_calc.aggregate(data, since.isoformat(), prev_since.isoformat())
+    return BuchoResponse(
+        days=days,
+        since=since.strftime("%Y-%m-%d"),
+        buchos=[BuchoCard(**b) for b in buchos],
     )
