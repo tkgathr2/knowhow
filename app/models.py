@@ -14,7 +14,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, relationship, validates
 
 
 class Base(DeclarativeBase):
@@ -96,6 +96,12 @@ class KbSession(Base):
         Index("ix_kb_sessions_project_created", "project_key", "created_at"),
     )
 
+    @validates("raw_log", "normalized_log", "tags")
+    def _sanitize_utf8(self, key, value):
+        from app.textutil import sanitize_tags, sanitize_utf8
+
+        return sanitize_tags(value) if key == "tags" else sanitize_utf8(value)
+
 
 class KbChunk(Base):
     __tablename__ = "kb_chunks"
@@ -132,6 +138,13 @@ class KbChunk(Base):
         Index("ix_kb_chunks_project_created", "project_key", "created_at"),
         Index("ix_kb_chunks_source", "source_type", "source_id"),
     )
+
+    @validates("content", "tags")
+    def _sanitize_utf8(self, key, value):
+        # 孤立サロゲート等の不正バイトを保存前に除去（22021事故の水際防止）
+        from app.textutil import sanitize_tags, sanitize_utf8
+
+        return sanitize_tags(value) if key == "tags" else sanitize_utf8(value)
 
 
 class KbFeedback(Base):

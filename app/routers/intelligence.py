@@ -372,3 +372,136 @@ async def get_top_chunks(
         for row in rows
     ]
     return TopChunksResponse(chunks=chunks, total=len(chunks))
+
+
+# ── 不正UTF-8バイト行の検出・修復（22021対策・一回もの運用ツール）────────────
+class RepairUtf8Request(BaseModel):
+    dry_run: bool = True
+
+
+class RepairUtf8Response(BaseModel):
+    scanned: int
+    broken_ids: list[int]
+    repaired: int
+    dry_run: bool
+    note: str = ""
+
+
+async def _id_is_broken(db: AsyncSession, chunk_id: int) -> bool:
+    """文字関数を1行に当てて 22021 が出るか判定。失敗時はrollbackで掃除。"""
+    from sqlalchemy.exc import DBAPIError
+
+    try:
+        await db.execute(
+            text(
+                "SELECT length(content) + coalesce(length(array_to_string(tags,'')),0) "
+                "FROM kb_chunks WHERE id = :i"
+            ),
+            {"i": chunk_id},
+        )
+        return False
+    except DBAPIError:
+        await db.rollback()
+        return True
+
+
+async def _range_is_broken(db: AsyncSession, lo: int, hi: int) -> bool:
+    from sqlalchemy.exc import DBAPIError
+
+    try:
+        await db.execute(
+            text(
+                "SELECT sum(length(content) + coalesce(length(array_to_string(tags,'')),0)) "
+                "FROM kb_chunks WHERE id BETWEEN :lo AND :hi"
+            ),
+            {"lo": lo, "hi": hi},
+        )
+        return False
+    except DBAPIError:
+        await db.rollback()
+        return True
+
+
+def _repair_bytes(b: bytes) -> str:
+    """必ず文字列化する修復。
+
+    UTF-8 strict → （ほぼUTF-8なら）replaceで欠損文字だけ潰す →
+    （大半が読めないバイト列なら）cp932 復元を試す → 最後は replace。
+    truncated UTF-8（末尾欠け）を cp932 で誤復元して全文を壊さないための順序。
+    """
+    try:
+        return b.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    replaced = b.decode("utf-8", errors="replace")
+    n_bad = replaced.count("�")
+    # 置換が2文字以下 or 全体の1割以下＝末尾欠け等の部分破損 → 欠損文字だけ置換
+    if n_bad <= 2 or n_bad / max(1, len(replaced)) <= 0.1:
+        return replaced
+    try:
+        return b.decode("cp932")  # 全体が別エンコーディング＝文字化け復元
+    except UnicodeDecodeError:
+        return replaced
+
+
+@router.post("/intelligence/repair-utf8", response_model=RepairUtf8Response)
+async def repair_utf8(
+    req: RepairUtf8Request, db: AsyncSession = Depends(get_db)
+) -> RepairUtf8Response:
+    """kb_chunks 内の不正UTF-8バイト行（left/length等で22021を起こす行）を特定し修復する。
+
+    検出は id 範囲の二分探索（壊れた範囲だけ深掘り）。修復は convert_to(…,'UTF8') の
+    同一エンコーディング素通し（無変換）で生バイトを取り出し、cp932復元→replaceの順で再保存。
+    """
+    id_rows = await db.execute(text("SELECT min(id), max(id), count(*) FROM kb_chunks"))
+    lo, hi, total = id_rows.one()
+    if not total:
+        return RepairUtf8Response(scanned=0, broken_ids=[], repaired=0, dry_run=req.dry_run)
+
+    broken: list[int] = []
+
+    async def _bisect(a: int, b: int) -> None:
+        if a > b:
+            return
+        if not await _range_is_broken(db, a, b):
+            return
+        if a == b:
+            broken.append(a)
+            return
+        mid = (a + b) // 2
+        await _bisect(a, mid)
+        await _bisect(mid + 1, b)
+
+    await _bisect(int(lo), int(hi))
+
+    repaired = 0
+    if not req.dry_run:
+        for cid in broken:
+            row = (
+                await db.execute(
+                    text(
+                        "SELECT convert_to(content,'UTF8') AS cb, "
+                        "convert_to(coalesce(array_to_string(tags, E'\x1f'),''),'UTF8') AS tb "
+                        "FROM kb_chunks WHERE id = :i"
+                    ),
+                    {"i": cid},
+                )
+            ).one_or_none()
+            if row is None:
+                continue
+            content = _repair_bytes(bytes(row.cb or b""))
+            tags_joined = _repair_bytes(bytes(row.tb or b""))
+            tags = [t for t in tags_joined.split("\x1f") if t] if tags_joined else []
+            await db.execute(
+                update(KbChunk).where(KbChunk.id == cid).values(content=content, tags=tags)
+            )
+            repaired += 1
+        await db.commit()
+
+    return RepairUtf8Response(
+        scanned=int(total),
+        broken_ids=broken,
+        repaired=repaired,
+        dry_run=req.dry_run,
+        note="修復後のembeddingは原文ほぼ同一のため再生成不要（置換文字のみ差分）",
+    )
