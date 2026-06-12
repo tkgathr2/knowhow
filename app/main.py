@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.auth import require_api_key
 from app.middleware import BrowserAuthMiddleware
-from app.routers import admin, anthropic_cost, auth_oauth, auto_learn, bulk, dashboard, devin, external, feedback, health, ingest, intelligence, metabolize, nightly, search, token_cutter, webhook
+from app.routers import admin, anthropic_cost, auth_oauth, auto_learn, bulk, dashboard, devin, digest, external, feedback, health, ingest, intelligence, metabolize, nightly, search, token_cutter, webhook
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _logger = logging.getLogger(__name__)
@@ -92,6 +92,8 @@ app.include_router(token_cutter.router, prefix="/api")
 app.include_router(anthropic_cost.router, prefix="/api")
 # 学びの自動ingest受け口（/auto-learn＝EP単位でKB_API_KEY保護。SessionEndフックが叩く）
 app.include_router(auto_learn.router, prefix="/api")
+# 1日のダイジェスト: /digest/daily=閲覧開放（middlewareでブラウザ保護） / /digest/run=EP単位で保護
+app.include_router(digest.router, prefix="/api")
 
 # --- 書き込み・バッチ・外部取込系：保護 ---
 app.include_router(ingest.router, prefix="/api", dependencies=_protected)
