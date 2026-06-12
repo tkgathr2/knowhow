@@ -1,4 +1,4 @@
-"""コストカッターくん（token-cutter）実績 API。
+"""トークンカッターくん（token-cutter）実績 API。
 
 POST /token-cutter/event : ゲート発動イベントを記録（認証なし開放＝各PCのフックが鍵なしで叩く）。
 GET  /token-cutter/stats : 実績を集計（ダッシュボード用・閲覧保護下）。

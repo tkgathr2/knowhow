@@ -1,4 +1,4 @@
--- コストカッターくん（token-cutter）の発動イベント記録テーブル。
+-- トークンカッターくん（token-cutter）の発動イベント記録テーブル。
 -- PreToolUse ゲートが「重い手」を検知して助言したイベントを貯め、実績を可視化する。
 -- 起動時マイグレーション(_run_migrations)で冪等に適用される（IF NOT EXISTS）。
 CREATE TABLE IF NOT EXISTS kb_token_cutter_events (
