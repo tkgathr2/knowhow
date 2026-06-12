@@ -70,7 +70,7 @@
 
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
     <div class="flex items-baseline gap-2 mb-1 flex-wrap">
-      <h2 class="font-semibold text-sm text-gray-700">推定削減コスト（日次・コストカッターくん）</h2>
+      <h2 class="font-semibold text-sm text-gray-700">推定削減コスト（日次・トークンカッターくん）</h2>
       <span id="costSummary" class="text-xs text-emerald-600 font-semibold"></span>
     </div>
     <p class="text-xs text-gray-400 mb-3">棒=その日に避けられた推定コスト（円・上限見積り）。重い手を着手前に検知して節約した分。<a href="/token-cutter" class="text-indigo-500 underline">内訳→</a></p>
@@ -233,7 +233,7 @@ async function loadCost(){
     cardsEl.insertAdjacentHTML('afterbegin',`<div id="cost-kpi" class="bg-emerald-50 rounded-xl shadow-sm border border-emerald-200 p-4 fade-in">
       <div class="text-xs text-emerald-700">推定削減コスト（30日）</div>
       <div class="text-2xl font-bold text-emerald-700 mt-0.5">${esc(mn.jpy_human||'0円')}</div>
-      <div class="text-xs text-emerald-600 mt-0.5">≈ $${fmt(mn.usd||0)}・コストカッター</div>
+      <div class="text-xs text-emerald-600 mt-0.5">≈ $${fmt(mn.usd||0)}・トークンカッター</div>
     </div>`);
   }
   if(costChart)costChart.destroy();
