@@ -389,38 +389,32 @@ class RepairUtf8Response(BaseModel):
 
 async def _id_is_broken(db: AsyncSession, chunk_id: int) -> bool:
     """文字関数を1行に当てて 22021 が出るか判定。失敗時はrollbackで掃除。"""
-    from sqlalchemy.exc import DBAPIError
-
     try:
+        # 出力時のUTF-8検証まで通すため、実際にテキストを取り出す（22021は送出時に発火する）
         await db.execute(
             text(
-                # 本番で実際に22021を起こした式（left）をそのままプローブに使う
-                "SELECT octet_length(left(content, 200)) + length(content) "
-                "+ coalesce(octet_length(left(array_to_string(tags,''), 200)), 0) "
+                "SELECT left(content, 200), left(coalesce(array_to_string(tags,','),''), 200) "
                 "FROM kb_chunks WHERE id = :i"
             ),
             {"i": chunk_id},
         )
         return False
-    except DBAPIError:
+    except Exception:
         await db.rollback()
         return True
 
 
 async def _range_is_broken(db: AsyncSession, lo: int, hi: int) -> bool:
-    from sqlalchemy.exc import DBAPIError
-
     try:
         await db.execute(
             text(
-                "SELECT sum(octet_length(left(content, 200)) + length(content) "
-                "+ coalesce(octet_length(left(array_to_string(tags,''), 200)), 0)) "
+                "SELECT left(content, 200), left(coalesce(array_to_string(tags,','),''), 200) "
                 "FROM kb_chunks WHERE id BETWEEN :lo AND :hi"
             ),
             {"lo": lo, "hi": hi},
         )
         return False
-    except DBAPIError:
+    except Exception:
         await db.rollback()
         return True
 
