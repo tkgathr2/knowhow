@@ -12,7 +12,8 @@
   「既取込」として返すので、pending の録音は翌日以降のバッチで再送され、昇格の機会を得る。
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
+from datetime import date as date_cls
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -20,11 +21,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import koe_chunk, koe_logic, koe_tag
+from app import koe_chunk, koe_digest, koe_logic, koe_tag
 from app.config import settings
 from app.database import get_db
 from app.embedding import create_embedding
 from app.models import KbChunk, KbRecording, KbSpeakerAlias, KbUtterance
+
+_JST = timezone(timedelta(hours=9))
 
 router = APIRouter(tags=["koe"])
 
@@ -309,6 +312,126 @@ async def koe_process(req: ProcessRequest, db: AsyncSession = Depends(get_db)) -
         results.append(ProcessResult(plaud_id=rec.plaud_id, status="processed", chunk_count=count))
 
     return ProcessResponse(results=results, total=len(results))
+
+
+# --- 日次ダイジェスト（その日の録音→決めたこと/約束/人物別 を経営ダイジェスト化）---
+
+
+class DigestRequest(BaseModel):
+    date: date_cls  # JST の日付（例: 2026-06-04）
+    save: bool = True
+
+
+class DigestResponse(BaseModel):
+    date: str
+    recording_count: int
+    digest: str
+    source: str  # llm | fallback
+    saved: bool
+
+
+def _jst_day_range_utc(d: date_cls) -> tuple[datetime, datetime]:
+    """JST の1日 [d 00:00, d+1 00:00) を UTC の半開区間に変換する。"""
+    start_jst = datetime(d.year, d.month, d.day, tzinfo=_JST)
+    end_jst = start_jst + timedelta(days=1)
+    return start_jst.astimezone(UTC), end_jst.astimezone(UTC)
+
+
+async def _recordings_on(db: AsyncSession, d: date_cls) -> list[KbRecording]:
+    start_utc, end_utc = _jst_day_range_utc(d)
+    rows = await db.execute(
+        select(KbRecording)
+        .where(
+            KbRecording.transcript_status == "ingested",
+            KbRecording.recorded_at >= start_utc,
+            KbRecording.recorded_at < end_utc,
+        )
+        .order_by(KbRecording.recorded_at.asc())
+    )
+    return list(rows.scalars())
+
+
+@router.post("/koe/digest", response_model=DigestResponse)
+async def koe_digest_generate(req: DigestRequest, db: AsyncSession = Depends(get_db)) -> DigestResponse:
+    """指定日(JST)の録音をまとめて経営ダイジェストを生成（save=True で kb_chunks に保存）。"""
+    date_label = req.date.isoformat()
+    recordings = await _recordings_on(db, req.date)
+
+    rec_dicts: list[dict] = []
+    for rec in recordings:
+        lines = [{"speaker": u["speaker"], "content": u["content"]} for u in await _fetch_utterances(db, rec.id)]
+        rec_dicts.append(
+            {
+                "title": rec.title,
+                "recorded_at": str(rec.recorded_at) if rec.recorded_at else None,
+                "speakers": list(rec.speaker_set or []),
+                "lines": lines,
+            }
+        )
+
+    source_text = koe_digest.build_digest_source(date_label, rec_dicts)
+    digest = await koe_tag.generate_daily_digest(source_text)
+    source = "llm"
+    if not digest:
+        digest = koe_digest.fallback_digest(date_label, rec_dicts)
+        source = "fallback"
+
+    saved = False
+    if req.save and recordings:
+        db.add(
+            KbChunk(
+                project_key=LORE_PROJECT,
+                source_type="digest",
+                source_id=0,
+                chunk_type="daily_digest",
+                content=digest,
+                tags=["日次ダイジェスト", date_label],
+                importance_score=7,
+                confidence_score=0.9,
+                alpha=9.0,
+                beta=1.0,
+                meta={"date": date_label, "recording_count": len(recordings), "source": source},
+            )
+        )
+        await db.commit()
+        saved = True
+
+    return DigestResponse(
+        date=date_label,
+        recording_count=len(recordings),
+        digest=digest,
+        source=source,
+        saved=saved,
+    )
+
+
+@router.get("/koe/digest", response_model=DigestResponse)
+async def koe_digest_get(
+    date: date_cls = Query(...), db: AsyncSession = Depends(get_db)
+) -> DigestResponse:
+    """保存済みの日次ダイジェストを取得（同日複数あれば最新）。"""
+    date_label = date.isoformat()
+    rows = await db.execute(
+        select(KbChunk)
+        .where(
+            KbChunk.project_key == LORE_PROJECT,
+            KbChunk.chunk_type == "daily_digest",
+            KbChunk.meta["date"].astext == date_label,
+        )
+        .order_by(KbChunk.created_at.desc())
+        .limit(1)
+    )
+    chunk = rows.scalar_one_or_none()
+    if chunk is None:
+        return DigestResponse(date=date_label, recording_count=0, digest="", source="none", saved=False)
+    meta = chunk.meta or {}
+    return DigestResponse(
+        date=date_label,
+        recording_count=int(meta.get("recording_count", 0)),
+        digest=chunk.content,
+        source=str(meta.get("source", "llm")),
+        saved=True,
+    )
 
 
 class RecordingItem(BaseModel):
