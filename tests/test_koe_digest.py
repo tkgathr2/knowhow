@@ -5,7 +5,7 @@ from datetime import date
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from app import koe_digest
+from app import koe_digest, koe_tag
 from app.database import get_db
 from app.routers import koe as koe_router
 
@@ -92,10 +92,17 @@ class _Utt:
         self.end_ms = 0
 
 
+class _Chunk:
+    def __init__(self, content, meta):
+        self.content = content
+        self.meta = meta
+
+
 class _FakeSession:
-    def __init__(self, recordings=None, utterances=None):
+    def __init__(self, recordings=None, utterances=None, chunks=None):
         self._recordings = recordings or []
         self._utts = utterances or []
+        self._chunks = chunks or []
         self.added = []
         self.commits = 0
 
@@ -103,6 +110,8 @@ class _FakeSession:
         s = str(stmt).lower()
         if "kb_utterances" in s:
             return _Result(self._utts)
+        if "kb_chunks" in s:  # GET /koe/digest（保存済みダイジェスト取得）
+            return _Result(self._chunks)
         if "kb_recordings" in s:
             return _Result(self._recordings)
         return _Result([])
@@ -142,6 +151,47 @@ def test_digest_generates_and_saves_fallback():
     assert len(sess.added) == 1
     assert sess.added[0].chunk_type == "daily_digest"
     assert sess.added[0].project_key == "lore"
+    # ダイジェストは検索網から外す＝confidence は閾値0.70未満
+    assert sess.added[0].confidence_score == 0.5
+
+
+def test_digest_llm_success_path(monkeypatch):
+    """LLMが本文を返す正常系：source='llm'・保存内容がダイジェスト本文。"""
+
+    async def _fake_gen(_src):
+        return "## 今日のサマリ\n- 採用を強化\n## 決めたこと\n- 媒体追加"
+
+    monkeypatch.setattr(koe_tag, "generate_daily_digest", _fake_gen)
+    rec = _Rec(1, "面談", "2026-06-04 10:00:00+00", ["高木"])
+    sess = _FakeSession(recordings=[rec], utterances=[_Utt(0, "高木", "採用やる")])
+    resp = _client(sess).post("/api/koe/digest", json={"date": "2026-06-04", "save": True})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "llm"
+    assert "今日のサマリ" in body["digest"]
+    assert sess.added[0].content == body["digest"]
+
+
+def test_digest_get_returns_latest():
+    chunk = _Chunk("## 保存済みダイジェスト", {"date": "2026-06-04", "recording_count": 3, "source": "llm"})
+    sess = _FakeSession(chunks=[chunk])
+    resp = _client(sess).get("/api/koe/digest", params={"date": "2026-06-04"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["digest"] == "## 保存済みダイジェスト"
+    assert body["recording_count"] == 3
+    assert body["source"] == "llm"
+    assert body["saved"] is True
+
+
+def test_digest_get_none_when_absent():
+    sess = _FakeSession(chunks=[])
+    resp = _client(sess).get("/api/koe/digest", params={"date": "2026-06-04"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["digest"] == ""
+    assert body["source"] == "none"
+    assert body["saved"] is False
 
 
 def test_digest_no_recordings_not_saved():

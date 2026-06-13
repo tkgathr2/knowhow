@@ -37,6 +37,9 @@ _CONFIRMED = ("ingested", "empty")
 # プロダクト名「ロア（Lore）」。録音由来の検索資産はこの project_key で kb_chunks に相乗りする。
 LORE_PROJECT = "lore"
 
+# 日次ダイジェストのチャンクは録音本体ではない（要約）ので source_id を持たない番兵値。
+_DIGEST_SOURCE_ID = 0
+
 
 class Segment(BaseModel):
     speaker: str | None = None
@@ -382,14 +385,14 @@ async def koe_digest_generate(req: DigestRequest, db: AsyncSession = Depends(get
             KbChunk(
                 project_key=LORE_PROJECT,
                 source_type="digest",
-                source_id=0,
+                source_id=_DIGEST_SOURCE_ID,
                 chunk_type="daily_digest",
                 content=digest,
                 tags=["日次ダイジェスト", date_label],
                 importance_score=7,
-                confidence_score=0.9,
-                alpha=9.0,
-                beta=1.0,
+                # ダイジェストは「日付で取り出す/朝届ける」もので検索資産ではない。
+                # confidence を検索閾値(0.70)未満にして /search・/recall の網から外す（要約が生録音を押しのけない）。
+                confidence_score=0.5,
                 meta={"date": date_label, "recording_count": len(recordings), "source": source},
             )
         )
