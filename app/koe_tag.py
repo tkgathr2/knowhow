@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from openai import AsyncOpenAI
 
-from app import koe_chunk
+from app import koe_chunk, koe_digest
 from app.config import settings
 
 TAG_MODEL = "gpt-4o-mini"
+# ダイジェストは社長が読む成果物＝質重視で上位モデル
+DIGEST_MODEL = "gpt-4o"
 
 _SYSTEM_PROMPT = (
     "あなたは会議・会話の文字起こしに話題タグを付ける専門家です。"
@@ -48,3 +50,23 @@ async def tag_chunk(content: str) -> list[str]:
         return koe_chunk.parse_tags(resp.choices[0].message.content)
     except Exception:
         return []
+
+
+async def generate_daily_digest(source_text: str) -> str | None:
+    """1日分の録音テキストから経営ダイジェスト(Markdown)を生成。失敗時 None（呼び出し側がフォールバック）。"""
+    if not settings.openai_api_key or not source_text.strip():
+        return None
+    try:
+        resp = await _get_client().chat.completions.create(
+            model=DIGEST_MODEL,
+            messages=[
+                {"role": "system", "content": koe_digest.DIGEST_SYSTEM_PROMPT},
+                {"role": "user", "content": source_text},
+            ],
+            temperature=0.2,
+            max_tokens=1500,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return text or None
+    except Exception:
+        return None
