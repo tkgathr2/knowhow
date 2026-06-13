@@ -252,3 +252,67 @@ class KbExternalSource(Base):
     sync_count = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# --- こえキング（録音資産化）Phase 0 ---
+
+
+class KbRecording(Base):
+    __tablename__ = "kb_recordings"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    plaud_id = Column(Text, nullable=False, unique=True)
+    title = Column(Text)
+    recorded_at = Column(DateTime(timezone=True))
+    duration_minutes = Column(Integer)
+    transcript_status = Column(String, nullable=False, default="pending")
+    speaker_set = Column(ARRAY(Text), nullable=False, default=list)
+    meta = Column(JSONB, nullable=False, default=dict)
+    ingested_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    utterances = relationship("KbUtterance", back_populates="recording", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_kb_recordings_recorded_at", "recorded_at"),
+        Index("ix_kb_recordings_status", "transcript_status"),
+    )
+
+    @validates("speaker_set")
+    def _sanitize_tags(self, key, value):
+        from app.textutil import sanitize_tags
+
+        return sanitize_tags(value)
+
+
+class KbUtterance(Base):
+    __tablename__ = "kb_utterances"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    recording_id = Column(BigInteger, ForeignKey("kb_recordings.id", ondelete="CASCADE"), nullable=False)
+    seq = Column(Integer, nullable=False)
+    speaker = Column(Text, nullable=False)
+    speaker_raw = Column(Text)
+    start_ms = Column(BigInteger, nullable=False)
+    end_ms = Column(BigInteger, nullable=False)
+    content = Column(Text, nullable=False)
+
+    recording = relationship("KbRecording", back_populates="utterances")
+
+    __table_args__ = (
+        Index("uq_kb_utterances_seq", "recording_id", "seq", unique=True),
+        Index("ix_kb_utterances_speaker", "speaker"),
+    )
+
+    @validates("content")
+    def _sanitize_utf8(self, key, value):
+        from app.textutil import sanitize_utf8
+
+        return sanitize_utf8(value)
+
+
+class KbSpeakerAlias(Base):
+    __tablename__ = "kb_speaker_aliases"
+
+    alias = Column(Text, primary_key=True)
+    canonical = Column(Text, nullable=False)

@@ -168,10 +168,10 @@ def test_latest_daily_growth():
         {"date": "2026-06-11", "asset_added": 13, "asset_cumulative": 123, "growth_pct": 11.8},
         {"date": "2026-06-10", "asset_added": 10, "asset_cumulative": 110, "growth_pct": 10.0},
     ]
-    l = growth.latest_daily_growth(entries)
-    assert l["date"] == "2026-06-11"
-    assert l["growth_pct"] == 11.8
-    assert l["asset_cumulative"] == 123
+    latest = growth.latest_daily_growth(entries)
+    assert latest["date"] == "2026-06-11"
+    assert latest["growth_pct"] == 11.8
+    assert latest["asset_cumulative"] == 123
     assert growth.latest_daily_growth([]) is None
 
 

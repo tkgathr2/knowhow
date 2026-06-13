@@ -1,12 +1,14 @@
 """BrowserAuthMiddleware の境界挙動（fail-safe OFF / 保護 ON）を検証。"""
 import time
+
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from starlette.testclient import TestClient
 
+from app import authn
+from app import session as sess
 from app.config import settings
-from app import authn, session as sess
 from app.middleware import BrowserAuthMiddleware
 from app.routers import auth_oauth
 
