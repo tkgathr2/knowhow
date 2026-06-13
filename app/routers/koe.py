@@ -123,12 +123,29 @@ async def _handle_existing(
     db: AsyncSession, rec: KbRecording, utt_rows: list[dict], status: str,
     speakers: list[str], unknown: list[str], filter_meta: dict | None = None,
 ) -> KoeIngestResponse:
-    # すでに確定済み（ingested/empty/noise）の再送 → 何もしない（冪等）
-    if rec.transcript_status in _CONFIRMED:
+    # すでに確定済み（ingested/empty）の再送 → 何もしない（冪等）
+    if rec.transcript_status in ("ingested", "empty"):
         count = await _count_utts(db, rec.id)
         return _resp(rec, "already_ingested", count, list(rec.speaker_set or []), [])
 
-    # ここまで来た rec は pending。新payloadが確定情報（ingested/empty/noise）を持つなら昇格する
+    # noise だった録音：新payloadが会話/会議ソースで ingested 判定なら noise を解除して昇格。
+    # 発話は初回ingestで既に保存済みなので再追加しない（status を ingested に上げるだけ）。
+    if rec.transcript_status == "noise":
+        if status == "ingested":
+            rec.transcript_status = "ingested"
+            rec.ingested_at = datetime.now(UTC)
+            rec.speaker_set = speakers
+            new_meta = {**(rec.meta or {}), **(filter_meta or {})}
+            if unknown:
+                new_meta["unknown_speakers"] = unknown
+            rec.meta = new_meta
+            await db.commit()
+            await db.refresh(rec)
+            count = await _count_utts(db, rec.id)
+            return _resp(rec, "upgraded", count, speakers, unknown)
+        return _resp(rec, "already_ingested", await _count_utts(db, rec.id), list(rec.speaker_set or []), [])
+
+    # ここまで来た rec は pending。新payloadが確定情報（ingested/empty）を持つなら昇格する
     if status != "pending":
         await _add_utterances(db, rec.id, utt_rows)
         rec.transcript_status = status
@@ -154,8 +171,10 @@ async def koe_ingest(req: KoeIngestRequest, db: AsyncSession = Depends(get_db)) 
     status = koe_logic.decide_status(req.has_transcript, len(utt_rows))
     # 会話フィルタ：機内アナウンス・PA・環境音など「会話でない」録音は noise にして
     # チャンク化・ダイジェストの対象から外す（社長の実会話だけをロアに残す）。
+    # ただし会議ソース（tl;dv/Zoom/Meet/Teams）は元々が会議＝必ず会話なのでフィルタを通さない。
     filter_meta: dict = {}
-    if status == "ingested":
+    meeting_source = str(req.meta.get("source", "")).lower() in ("tldv", "zoom", "meet", "teams")
+    if status == "ingested" and not meeting_source:
         is_conv, reason, score = koe_filter.is_conversation(utt_rows)
         filter_meta = {"filter": reason, "conv_score": score}
         if not is_conv:

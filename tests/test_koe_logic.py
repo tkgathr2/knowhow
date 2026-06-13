@@ -219,6 +219,50 @@ def test_ingest_noise_recording_marked_noise():
     assert resp.json()["status"] == "noise"
 
 
+def test_ingest_meeting_source_bypasses_noise_filter():
+    """会議ソース(tl;dv)はフィルタを通さず必ず ingested（話者名が社長と一致しなくても会話扱い）。"""
+    sess = _FakeSession()
+    resp = _client(sess).post(
+        "/api/koe/ingest",
+        json={
+            "plaud_id": "tldv_x1",
+            "title": "小林さん打ち合わせ",
+            "has_transcript": True,
+            "meta": {"source": "tldv"},
+            "segments": [
+                {"start_time": 0, "end_time": 100, "content": "気になるポイントは？",
+                 "speaker": "株式会社En place代表 木村"},
+                {"start_time": 100, "end_time": 200, "content": "コストですね", "speaker": "ひろ 髙木豊大"},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ingested"  # noise にならない
+
+
+def test_ingest_noise_upgraded_when_meeting_resent():
+    """noise だった録音が会議ソースで再送されたら ingested に昇格（発話は再追加しない）。"""
+    rec = _Rec(rec_id=20, plaud_id="tldv_x2", status="noise", speaker_set=["A"])
+    sess = _FakeSession(existing=rec, utt_count=118)
+    resp = _client(sess).post(
+        "/api/koe/ingest",
+        json={
+            "plaud_id": "tldv_x2",
+            "has_transcript": True,
+            "meta": {"source": "tldv"},
+            "segments": [
+                {"start_time": 0, "end_time": 100, "content": "本題ですが", "speaker": "ひろ 髙木豊大"},
+                {"start_time": 100, "end_time": 200, "content": "はい", "speaker": "木村"},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "upgraded"
+    assert rec.transcript_status == "ingested"
+    # 既存発話があるので再追加しない（utterance は add されない）
+    assert sess.added == []
+
+
 def test_ingest_empty_transcript():
     sess = _FakeSession()
     resp = _client(sess).post(
