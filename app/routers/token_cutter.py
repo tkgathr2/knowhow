@@ -1,7 +1,8 @@
 """トークンカッターくん（token-cutter）実績 API。
 
-POST /token-cutter/event : ゲート発動イベントを記録（認証なし開放＝各PCのフックが鍵なしで叩く）。
-GET  /token-cutter/stats : 実績を集計（ダッシュボード用・閲覧保護下）。
+POST /token-cutter/event  : ゲート発動イベントを記録（認証なし開放＝各PCのフックが鍵なしで叩く）。
+GET  /token-cutter/policy : フックが従う既定ポリシーを配信（認証なし開放＝event同様）。
+GET  /token-cutter/stats  : 実績を集計（ダッシュボード用・閲覧保護下）。
 """
 
 from __future__ import annotations
@@ -26,6 +27,10 @@ class TokenCutterEventIn(BaseModel):
     pc: str | None = None
     target_kb: int | None = None
     est_tokens: int = Field(default=0, ge=0)
+    # 任意の拡張情報（meta JSONB へ格納・マイグレーション不要）。後方互換のため全て任意。
+    ext: str | None = None
+    dir_class: str | None = None
+    bytes: int | None = Field(default=None, ge=0)
 
 
 class TokenCutterEventOut(BaseModel):
@@ -44,10 +49,23 @@ async def record_event(
         target_kb=ev.target_kb,
         est_tokens=max(0, int(ev.est_tokens or 0)),
     )
+    meta = {
+        k: v
+        for k, v in {"ext": ev.ext, "dir_class": ev.dir_class, "bytes": ev.bytes}.items()
+        if v is not None
+    }
+    if meta:
+        row.meta = meta
     db.add(row)
     await db.commit()
     await db.refresh(row)
     return TokenCutterEventOut(ok=True, id=row.id)
+
+
+@router.get("/token-cutter/policy")
+async def get_policy() -> dict:
+    """フックが従う既定ポリシーを配信（認証なし開放＝event同様・鍵なしで叩く）。"""
+    return tc.default_policy()
 
 
 class NameCount(BaseModel):

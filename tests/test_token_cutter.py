@@ -1,6 +1,11 @@
 """app.token_cutter（実績集計の純粋ロジック）の単体テスト。"""
 
+from fastapi import FastAPI
+from starlette.testclient import TestClient
+
 from app import token_cutter as tc
+from app.database import get_db
+from app.routers import token_cutter as tc_router
 
 
 def test_daily_keys_desc_union():
@@ -71,3 +76,80 @@ def test_with_shares():
     assert out[1]["token_pct"] == 25.0
     # 元の行は壊さない（新キー追加のみ）
     assert out[0]["count"] == 5
+
+
+def test_default_policy_shape():
+    p = tc.default_policy()
+    assert p["version"] == 1
+    assert set(p["thresholds"]) == {"large_read_bytes", "bash_cat_bytes", "large_read_block_bytes"}
+    assert "large_read" in p["enabled_reasons"]
+    assert "bash_cat_large" in p["enabled_reasons"]
+    assert p["deny_globs"] == []
+    assert "node_modules" in p["blocklist_dir_classes"]
+
+
+# --- ルーター（TestClient）テスト：DB は fake セッションで差し替える ---
+
+
+class _FakeSession:
+    """record_event が触る最小限（add/commit/refresh）だけ実装した fake AsyncSession。"""
+
+    def __init__(self, sink: list):
+        self._sink = sink
+
+    def add(self, row):
+        self._sink.append(row)
+
+    async def commit(self):
+        pass
+
+    async def refresh(self, row):
+        row.id = 1
+
+
+def _build_client(sink: list) -> TestClient:
+    app = FastAPI()
+    app.include_router(tc_router.router)
+
+    async def _fake_get_db():
+        yield _FakeSession(sink)
+
+    app.dependency_overrides[get_db] = _fake_get_db
+    return TestClient(app)
+
+
+def test_get_policy_endpoint():
+    c = _build_client([])
+    r = c.get("/token-cutter/policy")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["version"] == 1
+    assert body == tc.default_policy()
+
+
+def test_post_event_stores_meta():
+    sink: list = []
+    c = _build_client(sink)
+    r = c.post(
+        "/token-cutter/event",
+        json={
+            "tool": "Read",
+            "reason": "large_read",
+            "ext": "json",
+            "dir_class": "node_modules",
+            "bytes": 123456,
+        },
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "id": 1}
+    assert len(sink) == 1
+    assert sink[0].meta == {"ext": "json", "dir_class": "node_modules", "bytes": 123456}
+
+
+def test_post_event_without_ext_fields_has_empty_meta():
+    sink: list = []
+    c = _build_client(sink)
+    r = c.post("/token-cutter/event", json={"tool": "Read", "reason": "large_read"})
+    assert r.status_code == 200
+    # 拡張フィールドが無ければ meta はモデル既定（空 dict）のまま＝後方互換
+    assert sink[0].meta in ({}, None) or sink[0].meta == {}

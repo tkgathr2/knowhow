@@ -85,6 +85,26 @@ def share_pct(part: int, total: int) -> float:
     return round(int(part or 0) / total * 100, 1)
 
 
+def default_policy() -> dict:
+    """フックが従う既定ポリシー（DB不要・静的）。/token-cutter/policy が配信する。"""
+    return {
+        "version": 1,
+        "thresholds": {"large_read_bytes": 80000, "bash_cat_bytes": 80000, "large_read_block_bytes": 2097152},
+        "enabled_reasons": [
+            "large_read",
+            "broad_grep",
+            "bash_cat_large",
+            "bash_no_limit",
+            "bash_dump_generated",
+            "glob_from_root",
+            "reread_same",
+            "read_after_write",
+        ],
+        "deny_globs": [],
+        "blocklist_dir_classes": ["node_modules", "dist", "build", ".next", ".git"],
+    }
+
+
 def with_shares(rows: list[dict], total_tokens: int) -> list[dict]:
     """name/count/est_tokens の各行へ、削減トークンの占有率(token_pct)を付ける。"""
     out: list[dict] = []
