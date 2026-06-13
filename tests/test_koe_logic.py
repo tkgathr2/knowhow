@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from starlette.testclient import TestClient
 
 from app import koe_logic
+from app.auth import require_api_key
 from app.database import get_db
 from app.routers import koe as koe_router
 
@@ -154,6 +155,7 @@ def _client(session: _FakeSession) -> TestClient:
         yield session
 
     app.dependency_overrides[get_db] = _fake_get_db
+    app.dependency_overrides[require_api_key] = lambda: None  # write系の鍵ガードをテストでは無効化
     return TestClient(app)
 
 

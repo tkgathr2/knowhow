@@ -124,8 +124,9 @@ app.include_router(external.router, prefix="/api", dependencies=_protected)
 app.include_router(nightly.router, prefix="/api", dependencies=_protected)
 # 学びの新陳代謝（候補取得＋一括deprecated化）。X-API-Key（KB_API_KEY）で保護。
 app.include_router(metabolize.router, prefix="/api", dependencies=_protected)
-# こえキング（録音資産）：取込・一覧とも X-API-Key 保護（録音内容は機微＝read も保護）
-app.include_router(koe.router, prefix="/api", dependencies=_protected)
+# ロア（録音資産）：write系(ingest/process/digest生成)はEP単位でX-API-Key保護（koe.py の _WRITE_GUARD）。
+# read系(GET digest/recordings)はブラウザ=Googleログイン / バッチ=X-API-Key（middleware の保護プレフィックス）。
+app.include_router(koe.router, prefix="/api")
 
 # Webhook は API キーではなく GitHub HMAC 署名（X-Hub-Signature-256）で検証するため対象外
 app.include_router(webhook.router, prefix="/api")
@@ -143,6 +144,11 @@ async def root():
 @app.get("/growth", include_in_schema=False)
 async def growth_page():
     return FileResponse(_STATIC_DIR / "growth.html")
+
+
+@app.get("/lore", include_in_schema=False)
+async def lore_page():
+    return FileResponse(_STATIC_DIR / "lore.html")
 
 
 @app.get("/daily", include_in_schema=False)

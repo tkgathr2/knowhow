@@ -19,7 +19,7 @@ from starlette.responses import JSONResponse, RedirectResponse
 from app import authn
 from app import session as sess
 
-_PAGE_PATHS = {"/", "/growth", "/daily", "/token-cutter", "/anthropic-cost"}
+_PAGE_PATHS = {"/", "/growth", "/daily", "/token-cutter", "/anthropic-cost", "/lore"}
 _PROTECTED_API_PREFIXES = (
     "/api/stats",
     "/api/growth",
@@ -30,6 +30,10 @@ _PROTECTED_API_PREFIXES = (
     "/api/chunks",
     "/api/search",
     "/api/devin/recall",
+    # ロア（録音資産）の read：録音内容は機微なのでブラウザは Google ログイン必須
+    # （GET /koe/digest・/koe/recordings）。POST 系は koe 側の X-API-Key ガードが別途効く。
+    "/api/koe/digest",
+    "/api/koe/recordings",
 )
 _ALWAYS_OPEN_PREFIXES = ("/health", "/auth", "/static")
 

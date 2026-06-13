@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ロア — 録音アシスタント</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px);} to { opacity: 1; transform: translateY(0);} }
+  .md h2 { font-size: 1.05rem; font-weight: 700; margin: 0.9rem 0 0.4rem; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; }
+  .md h3 { font-size: 0.95rem; font-weight: 600; margin: 0.7rem 0 0.3rem; color: #4338ca; }
+  .md ul { list-style: disc; margin-left: 1.2rem; margin-bottom: 0.4rem; }
+  .md li { font-size: 0.9rem; line-height: 1.6; color: #334155; margin: 0.1rem 0; }
+  .md p { font-size: 0.9rem; line-height: 1.7; color: #334155; margin: 0.3rem 0; }
+  .md strong { color: #0f172a; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:9999px; font-size:0.7rem; font-weight:500; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-violet-600 rounded-lg flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0m7 7v3m0-3a4 4 0 004-4V7a4 4 0 10-8 0v4a4 4 0 004 4z"/></svg>
+      </div>
+      <h1 class="text-lg font-bold text-gray-900">ロア</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">録音アシスタント</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/daily" class="text-sm px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg transition">毎日ログ</a>
+      <a href="/" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">ノウハウ</a>
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-4xl mx-auto px-4 py-6 space-y-8">
+
+  <!-- 日次ダイジェスト -->
+  <section>
+    <div class="flex items-center gap-2 mb-3 flex-wrap">
+      <h2 class="text-base font-bold text-gray-800">📝 その日のダイジェスト</h2>
+      <input id="dg-date" type="date" class="text-sm border border-gray-300 rounded-lg px-2 py-1">
+      <button onclick="loadDigest()" class="text-sm px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition">表示</button>
+      <span class="text-xs text-gray-400">録音から「決めたこと・約束・人物別」を自動でまとめます</span>
+    </div>
+    <div id="dg-box" class="bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-4">
+      <p class="text-sm text-gray-400">日付を選んで「表示」を押してください。</p>
+    </div>
+  </section>
+
+  <!-- 録音をさがす -->
+  <section>
+    <div class="flex items-center gap-2 mb-3 flex-wrap">
+      <h2 class="text-base font-bold text-gray-800">🔍 録音をさがす</h2>
+      <input id="q" type="text" placeholder="例：山田コンサル / 外国人材 / 不動産"
+             class="text-sm border border-gray-300 rounded-lg px-3 py-1 w-64" onkeydown="if(event.key==='Enter')doSearch()">
+      <button onclick="doSearch()" class="text-sm px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition">検索</button>
+      <span class="text-xs text-gray-400">「あの話なんやったっけ？」を引けます</span>
+    </div>
+    <div id="search-box" class="space-y-2"></div>
+  </section>
+
+  <!-- 取り込み済み録音 -->
+  <section>
+    <h2 class="text-base font-bold text-gray-800 mb-3">🎙️ 取り込み済みの録音</h2>
+    <div id="rec-box" class="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
+      <p class="text-sm text-gray-400 px-4 py-3">読み込み中…</p>
+    </div>
+  </section>
+
+</div>
+
+<footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">ロア — 録音を経営資産に</footer>
+
+<script>
+const API = window.location.origin;
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+async function getJSON(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
+async function postJSON(p,body){try{const r=await fetch(API+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)return null;return await r.json();}catch{return null;}}
+
+const TAGCOLORS=['bg-blue-100 text-blue-700','bg-green-100 text-green-700','bg-purple-100 text-purple-700','bg-orange-100 text-orange-700','bg-pink-100 text-pink-700','bg-teal-100 text-teal-700'];
+function tagColor(t){let h=0;for(let i=0;i<t.length;i++)h=((h<<5)-h+t.charCodeAt(i))|0;return TAGCOLORS[Math.abs(h)%TAGCOLORS.length];}
+
+async function loadAuth(){
+  const d=await getJSON('/auth/me');
+  if(d&&d.oauth_enabled&&d.user){
+    document.getElementById('auth-user').textContent=d.user;
+    const b=document.getElementById('auth-box');b.classList.remove('hidden');b.classList.add('flex');
+  }
+}
+
+async function loadDigest(){
+  const date=document.getElementById('dg-date').value;
+  const box=document.getElementById('dg-box');
+  if(!date){box.innerHTML='<p class="text-sm text-gray-400">日付を選んでください。</p>';return;}
+  box.innerHTML='<p class="text-sm text-gray-400">読み込み中…</p>';
+  const d=await getJSON('/api/koe/digest?date='+date);
+  if(!d||!d.digest){
+    box.innerHTML='<p class="text-sm text-gray-400">この日のダイジェストはまだありません。</p>';return;
+  }
+  box.innerHTML=`<div class="text-xs text-gray-400 mb-2">${esc(date)} ／ 録音 ${d.recording_count} 件 ${d.source==='fallback'?'（簡易版）':''}</div>
+    <div class="md fade-in">${marked.parse(d.digest)}</div>`;
+}
+
+function hitCard(r){
+  const tags=(r.tags||[]).slice(0,6).map(t=>`<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join(' ');
+  return `<div class="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 fade-in">
+    <div class="flex gap-1 mb-1 flex-wrap">${tags}</div>
+    <div class="text-sm text-gray-700 whitespace-pre-wrap">${esc(r.content)}</div>
+  </div>`;
+}
+async function doSearch(){
+  const q=document.getElementById('q').value.trim();
+  const box=document.getElementById('search-box');
+  if(!q){box.innerHTML='';return;}
+  box.innerHTML='<p class="text-sm text-gray-400">検索中…</p>';
+  const d=await postJSON('/api/search/hybrid',{project_key:'lore',query:q,top_k:10});
+  if(!d||!d.results||!d.results.length){box.innerHTML='<p class="text-sm text-gray-400">見つかりませんでした。</p>';return;}
+  box.innerHTML=d.results.map(hitCard).join('');
+}
+
+function recRow(r){
+  const st={ingested:'取込済',pending:'文字起こし待ち',empty:'無音',failed:'失敗'}[r.transcript_status]||r.transcript_status;
+  const stc={ingested:'bg-green-100 text-green-700',pending:'bg-yellow-100 text-yellow-700',empty:'bg-gray-100 text-gray-500',failed:'bg-red-100 text-red-600'}[r.transcript_status]||'bg-gray-100 text-gray-500';
+  const dt=r.recorded_at?String(r.recorded_at).slice(0,16).replace('T',' '):'';
+  const sp=(r.speakers||[]).join('、');
+  return `<div class="px-4 py-2.5 flex items-center justify-between gap-3">
+    <div class="min-w-0">
+      <div class="text-sm text-gray-800 truncate">${esc(r.title||'（無題）')}</div>
+      <div class="text-xs text-gray-400">${esc(dt)} ${sp?'／ '+esc(sp):''}</div>
+    </div>
+    <span class="tag ${stc} shrink-0">${esc(st)}</span>
+  </div>`;
+}
+async function loadRecordings(){
+  const box=document.getElementById('rec-box');
+  const d=await getJSON('/api/koe/recordings?limit=50');
+  if(!d||!d.recordings||!d.recordings.length){box.innerHTML='<p class="text-sm text-gray-400 px-4 py-3">まだ録音が取り込まれていません。</p>';return;}
+  box.innerHTML=d.recordings.map(recRow).join('');
+}
+
+function init(){
+  loadAuth();
+  // ダイジェストの初期日付：データのある最新日を狙って 2026-06-04、無ければ今日
+  const today=new Date();const iso=today.toISOString().slice(0,10);
+  document.getElementById('dg-date').value='2026-06-04';
+  document.getElementById('dg-date').max=iso;
+  loadDigest();
+  loadRecordings();
+}
+init();
+</script>
+</body>
+</html>

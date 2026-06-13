@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from app import koe_digest, koe_tag
+from app.auth import require_api_key
 from app.database import get_db
 from app.routers import koe as koe_router
 
@@ -131,6 +132,7 @@ def _client(session):
         yield session
 
     app.dependency_overrides[get_db] = _fake_get_db
+    app.dependency_overrides[require_api_key] = lambda: None
     return TestClient(app)
 
 
