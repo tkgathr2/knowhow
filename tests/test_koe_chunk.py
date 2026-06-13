@@ -210,3 +210,22 @@ def test_process_unknown_plaud_id_returns_empty():
     resp = _client(sess).post("/api/koe/process", json={"plaud_id": "nope"})
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
+
+
+def test_process_batch_path_no_plaud_id():
+    """plaud_id 未指定のバッチ経路（NOT IN サブクエリで未処理録音を拾う）。"""
+    rec = _Rec(5, "batch1", title="バッチ", recorded_at="2026-06-13")
+    utts = [_Utt(0, "高木", "バッチ処理の確認")]
+    sess = _FakeSession(target=rec, utterances=utts, existing_chunk_count=0)
+    resp = _client(sess).post("/api/koe/process", json={"limit": 10})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["results"][0]["plaud_id"] == "batch1"
+    assert body["results"][0]["status"] == "processed"
+
+
+def test_parse_tags_drops_overlong_garbage():
+    """説明文を1要素で返すような長文ゴミは捨てる（L-1）。"""
+    garbage = "これはタグではなく長い説明文です" * 5  # 40字超
+    assert koe_chunk.parse_tags(f'["採用", "{garbage}"]') == ["採用"]

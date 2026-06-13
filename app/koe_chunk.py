@@ -96,11 +96,15 @@ def parse_tags(raw: str | None, max_tags: int = 6) -> list[str]:
     return _clean_tags([s], max_tags)
 
 
+_MAX_TAG_LEN = 40
+
+
 def _clean_tags(items: list, max_tags: int) -> list[str]:
     out: list[str] = []
     for it in items:
         t = str(it).strip().strip("\"'").strip("# ").strip()
-        if t and t not in out:
+        # 空・長すぎ（LLMが説明文を1要素で返した等のゴミ）は捨てる
+        if t and len(t) <= _MAX_TAG_LEN and t not in out:
             out.append(t)
         if len(out) >= max_tags:
             break
