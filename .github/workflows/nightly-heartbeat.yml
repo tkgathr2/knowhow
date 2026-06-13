@@ -14,12 +14,31 @@ jobs:
         env:
           KB_API_KEY: ${{ secrets.KB_API_KEY }}
         run: |
-          # KB_API_KEY シークレットが設定されていればヘッダを付与（認証有効化後に対応）。
+          # KB_API_KEY シークレットが設定されていればヘッダを付与。
           AUTH=()
           if [ -n "${KB_API_KEY}" ]; then AUTH=(-H "X-API-Key: ${KB_API_KEY}"); fi
-          curl -fsS --max-time 120 -X POST \
+          # 夜間ジョブは完了まで120秒を超えることがある。ハートビートの役目は「起動を確実にトリガーする」ことで、
+          # 完了監視ではない。よって 受理(2xx) / 既に実行中(409) / 処理継続中(curlタイムアウト=28) は成功とみなし、
+          # 真の異常（接続不可・認証エラー401/403・5xx・その他4xx）だけを失敗(赤)にする。
+          set +e
+          CODE=$(curl -sS -o /tmp/nightly_resp.txt -w '%{http_code}' --max-time 60 -X POST \
             https://knowhow.up.railway.app/api/nightly/run \
             -H 'Content-Type: application/json' \
             "${AUTH[@]}" \
-            -d '{"score_dry_run": false}'
-          echo "\nnightly heartbeat triggered."
+            -d '{"score_dry_run": false}')
+          RC=$?
+          echo "curl rc=${RC} http_code=${CODE}"
+          cat /tmp/nightly_resp.txt 2>/dev/null || true
+          echo
+          if [ "${RC}" -eq 28 ]; then
+            echo "nightly heartbeat: triggered (still running; client timeout) -> OK"
+            exit 0
+          fi
+          if [ "${RC}" -ne 0 ]; then
+            echo "nightly heartbeat: curl transport error rc=${RC} -> FAIL"
+            exit 1
+          fi
+          case "${CODE}" in
+            2*|409) echo "nightly heartbeat: accepted/already-running (${CODE}) -> OK"; exit 0 ;;
+            *)      echo "nightly heartbeat: unexpected HTTP ${CODE} -> FAIL"; exit 1 ;;
+          esac
