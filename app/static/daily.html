@@ -126,7 +126,7 @@ function dayBlock(e){
         <span class="font-bold text-amber-900 text-sm">${esc(dg.headline)}</span>
         ${dg.is_final?'':'<span class="text-[10px] text-amber-500 border border-amber-300 rounded px-1.5 py-0.5">本日進行中・暫定</span>'}
       </div>
-      <div class="text-sm text-amber-900 leading-relaxed">${esc(dg.body)}</div>
+      <div class="text-sm text-amber-900 leading-relaxed" style="white-space:pre-line">${esc(dg.body)}</div>
       ${growthLine}
     </div>` : '';
 
