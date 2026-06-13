@@ -68,6 +68,18 @@ async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return
 const TAGCOLORS=['bg-blue-100 text-blue-700','bg-green-100 text-green-700','bg-purple-100 text-purple-700','bg-orange-100 text-orange-700','bg-pink-100 text-pink-700','bg-teal-100 text-teal-700','bg-yellow-100 text-yellow-700','bg-red-100 text-red-700','bg-indigo-100 text-indigo-700'];
 function tagColor(t){let h=0;for(let i=0;i<t.length;i++)h=((h<<5)-h+t.charCodeAt(i))|0;return TAGCOLORS[Math.abs(h)%TAGCOLORS.length];}
 
+// その日の学びからよく出るテーマ（タグ）を集計して上位を返す
+const TAG_SKIP=new Set(['auto-ingest','curated','学び','session_log','session-archive-202606','claude_code','devin']);
+function topDayTags(items,n=6){
+  const cnt={};
+  (items||[]).forEach(it=>(it.tags||[]).forEach(t=>{
+    t=(t||'').trim();
+    if(!t||TAG_SKIP.has(t)||t.indexOf('session')===0)return;
+    cnt[t]=(cnt[t]||0)+1;
+  }));
+  return Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).slice(0,n);
+}
+
 function dateLabel(d){
   const dt=new Date(d+'T00:00:00');
   const w=['日','月','火','水','木','金','土'][dt.getDay()];
@@ -111,6 +123,12 @@ function dayBlock(e){
   if(e.deprecated>0)chips.push(`<span class="chip bg-red-100 text-red-600" title="古くなって引退させた知識の数">整理 ${e.deprecated}</span>`);
   if(e.log_added>0)chips.push(`<span class="chip bg-gray-100 text-gray-500" title="システムが自動でメモした作業履歴の数">自動記録 +${e.log_added}</span>`);
 
+  const dayTagList = topDayTags(e.items);
+  const tagsRow = dayTagList.length ? `<div class="flex gap-1.5 mt-1.5 mb-1 flex-wrap">
+      <span class="text-xs text-amber-700/70 mr-0.5">テーマ:</span>
+      ${dayTagList.map(t=>`<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}
+    </div>` : '';
+
   const dg = digests[e.date];
   let growthLine='';
   if(e.growth_pct!=null){
@@ -126,9 +144,11 @@ function dayBlock(e){
         <span class="font-bold text-amber-900 text-sm">${esc(dg.headline)}</span>
         ${dg.is_final?'':'<span class="text-[10px] text-amber-500 border border-amber-300 rounded px-1.5 py-0.5">本日進行中・暫定</span>'}
       </div>
+      ${tagsRow}
       <div class="text-sm text-amber-900 leading-relaxed" style="white-space:pre-line">${esc(dg.body)}</div>
       ${growthLine}
-    </div>` : '';
+    </div>`
+    : (tagsRow ? `<div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 m-1.5">${tagsRow}${growthLine}</div>` : '');
 
   const items=(e.items||[]).map(itemCard).join('');
   const more=e.items_truncated>0?`<div class="px-3 py-2 text-xs text-gray-400">…ほか ${e.items_truncated} 件</div>`:'';
