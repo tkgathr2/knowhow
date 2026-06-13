@@ -112,6 +112,14 @@ function dayBlock(e){
   if(e.log_added>0)chips.push(`<span class="chip bg-gray-100 text-gray-500" title="システムが自動でメモした作業履歴の数">自動記録 +${e.log_added}</span>`);
 
   const dg = digests[e.date];
+  let growthLine='';
+  if(e.growth_pct!=null){
+    const up=e.growth_pct>=0;
+    const prevCum=Math.max(0,(e.asset_cumulative||0)-(e.asset_added||0));
+    growthLine=`<div class="mt-2 pt-2 border-t border-amber-200 text-sm font-semibold ${up?'text-emerald-700':'text-red-600'}">
+      📈 前の日より ${up?'+':''}${e.growth_pct}% 賢くなりました（知恵 ${prevCum.toLocaleString('ja-JP')}件 → ${(e.asset_cumulative||0).toLocaleString('ja-JP')}件）
+    </div>`;
+  }
   const digestBox = dg ? `<div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 m-1.5">
       <div class="flex items-center gap-2 mb-1">
         <span class="text-base">📝</span>
@@ -119,6 +127,7 @@ function dayBlock(e){
         ${dg.is_final?'':'<span class="text-[10px] text-amber-500 border border-amber-300 rounded px-1.5 py-0.5">本日進行中・暫定</span>'}
       </div>
       <div class="text-sm text-amber-900 leading-relaxed">${esc(dg.body)}</div>
+      ${growthLine}
     </div>` : '';
 
   const items=(e.items||[]).map(itemCard).join('');
