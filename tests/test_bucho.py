@@ -78,3 +78,52 @@ class TestAggregate:
         out = bucho.aggregate(rows, "2026-05-31T00:00:00+00:00", "2026-05-01T00:00:00+00:00")
         kujo = next(b for b in out if b["key"] == "kujo")
         assert kujo["growth_pct"] is None
+
+
+class TestMonthLabels:
+    def test_six_months(self):
+        assert bucho.month_labels("2026-06") == [
+            "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"
+        ]
+
+    def test_year_boundary(self):
+        assert bucho.month_labels("2026-02", n=4) == ["2025-11", "2025-12", "2026-01", "2026-02"]
+
+
+class TestDetail:
+    def _rows(self):
+        return [
+            {"chunk_id": 1, "project_key": "monthly-cf", "tags": [], "content_head": "資金繰り表",
+             "created_at": "2026-06-10T00:00:00+00:00", "recall_count": 4},
+            {"chunk_id": 2, "project_key": "monthly-cf", "tags": [], "content_head": "返済予定",
+             "created_at": "2026-05-15T00:00:00+00:00", "recall_count": 0},
+            {"chunk_id": 3, "project_key": "cto-lab", "tags": ["経理"], "content_head": "仕訳の知見",
+             "created_at": "2026-06-01T00:00:00+00:00", "recall_count": 2},
+            {"chunk_id": 4, "project_key": "knowhow", "tags": [], "content_head": "開発の知見",
+             "created_at": "2026-06-12T00:00:00+00:00", "recall_count": 9},
+        ]
+
+    def test_unknown_key_returns_none(self):
+        assert bucho.detail([], "nobody", "2026-05-31", "2026-05-01", "2026-06") is None
+
+    def test_kujo_detail(self):
+        d = bucho.detail(
+            self._rows(), "kujo",
+            "2026-05-31T00:00:00+00:00", "2026-05-01T00:00:00+00:00", "2026-06",
+        )
+        assert d["total"] == 3                      # monthly-cf×2 + 経理タグのcto-lab
+        assert d["added"] == 2 and d["added_prev"] == 1
+        assert d["recalls"] == 6
+        assert d["growth_pct"] == 100.0
+        assert d["monthly"][-1]["period"] == "2026-06" and d["monthly"][-1]["added"] == 2
+        assert d["recent_items"][0]["chunk_id"] == 1   # 新しい順
+        assert d["top_recalled"][0]["chunk_id"] == 1   # recall 4 が最多
+        assert d["top_projects"][0]["project_key"] == "monthly-cf"
+
+    def test_sanada_excludes_others(self):
+        d = bucho.detail(
+            self._rows(), "sanada",
+            "2026-05-31T00:00:00+00:00", "2026-05-01T00:00:00+00:00", "2026-06",
+        )
+        assert d["total"] == 1
+        assert d["recent_items"][0]["project_key"] == "knowhow"

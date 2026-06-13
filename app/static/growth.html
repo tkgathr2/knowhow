@@ -28,6 +28,7 @@
       <span class="text-xs text-gray-400 hidden sm:inline">ノウハウキング君</span>
     </div>
     <div class="flex items-center gap-2">
+      <a href="/bucho" class="text-sm px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition">部長別</a>
       <a href="/daily" class="text-sm px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition flex items-center gap-1">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
         毎日ログ
@@ -72,6 +73,7 @@
     <div class="flex items-baseline gap-2 mb-1 flex-wrap">
       <h2 class="font-semibold text-sm text-gray-700">部長別の成長（この30日）</h2>
       <span class="text-xs text-gray-400">どの部長の領域の知恵がどれだけ増えたか</span>
+      <a href="/bucho" class="text-xs text-indigo-500 underline ml-auto">部長別ページへ →</a>
     </div>
     <div id="buchoCards" class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3"><p class="text-xs text-gray-400">読み込み中…</p></div>
   </div>
@@ -270,7 +272,7 @@ async function loadBucho(){
     const g=b.growth_pct;
     const trend=g==null?'':(g>=0?`<span class="text-emerald-600 text-xs font-semibold">↑ 前の30日より+${g}%</span>`:`<span class="text-red-500 text-xs font-semibold">↓ 前の30日より${g}%</span>`);
     const bar=Math.round(b.added/maxAdded*100);
-    return `<div class="border border-gray-200 rounded-xl p-4 hover:shadow transition">
+    return `<a href="/bucho/${esc(b.key)}" class="block border border-gray-200 rounded-xl p-4 hover:shadow hover:border-indigo-300 transition">
       <div class="flex items-center gap-2 mb-1">
         <span class="text-2xl">${b.emoji}</span>
         <div class="min-w-0">
@@ -288,7 +290,7 @@ async function loadBucho(){
         <span title="この部長の知恵がAIに使われた回数">活躍 ${fmt(b.recalls)}回</span>
       </div>
       ${trend?`<div class="mt-1">${trend}</div>`:''}
-    </div>`;
+    </a>`;
   }).join('');
 }
 
