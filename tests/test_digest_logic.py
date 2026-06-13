@@ -71,4 +71,4 @@ class TestNormalizeLlmDigest:
             {"headline": "あ" * 100, "body": "い" * 5000}, "2026-06-12", _stats(), _items()
         )
         assert len(out["headline"]) <= 40
-        assert len(out["body"]) <= 1200
+        assert len(out["body"]) <= 2000

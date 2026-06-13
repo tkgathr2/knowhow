@@ -95,11 +95,28 @@ async def _day_data(db: AsyncSession, d: date) -> tuple[dict, list[dict]]:
         {"project_key": r.project_key, "tags": r.tags or [], "content": (r.content or "")[:200]}
         for r in rows
     ]
+    # 前日比・累計（本文に手応えを織り込むため）。累計＝その日の終わりまでの正味ナレッジ。
+    cumulative = int(
+        (
+            await db.execute(
+                select(func.count(KbChunk.id)).where(
+                    KbChunk.created_at < end, KbChunk.source_type != _LOG_SOURCE
+                )
+            )
+        ).scalar()
+        or 0
+    )
+    prev_cumulative = cumulative - asset_added
+    growth_pct = (
+        round(asset_added / prev_cumulative * 100, 1) if prev_cumulative > 0 else None
+    )
     stats = {
         "asset_added": asset_added,
         "log_added": log_added,
         "deprecated": deprecated,
         "recalled": recalled,
+        "asset_cumulative": cumulative,
+        "growth_pct": growth_pct,
     }
     return stats, items
 
@@ -119,8 +136,8 @@ async def _llm_digest(d: str, stats: dict, items: list[dict]) -> tuple[dict | No
                 {"role": "user", "content": digest_logic.build_llm_input(d, stats, items)},
             ],
             response_format={"type": "json_object"},
-            temperature=0.3,
-            max_tokens=500,
+            temperature=0.4,
+            max_tokens=1100,
         )
         raw = json.loads(resp.choices[0].message.content or "{}")
         return raw, _LLM_MODEL
