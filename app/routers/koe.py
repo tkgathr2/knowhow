@@ -443,6 +443,52 @@ async def koe_digest_get(
     )
 
 
+class DigestListItem(BaseModel):
+    date: str
+    digest: str
+    recording_count: int
+    source: str
+
+
+class DigestListResponse(BaseModel):
+    digests: list[DigestListItem]
+    total: int
+
+
+@router.get("/koe/digests", response_model=DigestListResponse)
+async def koe_digests(
+    days: int = Query(default=14, ge=1, le=90), db: AsyncSession = Depends(get_db)
+) -> DigestListResponse:
+    """保存済みの日次ダイジェストを新しい日付順でまとめて返す（数日分を一覧表示する用）。
+
+    同じ日付に複数あれば最新(created_at)の1件のみ。最大 days 件。
+    """
+    rows = await db.execute(
+        select(KbChunk)
+        .where(KbChunk.project_key == LORE_PROJECT, KbChunk.chunk_type == "daily_digest")
+        .order_by(KbChunk.created_at.desc())
+    )
+    seen: set[str] = set()
+    items: list[DigestListItem] = []
+    for c in rows.scalars():
+        meta = c.meta or {}
+        d = meta.get("date")
+        if not d or d in seen:
+            continue
+        seen.add(d)
+        items.append(
+            DigestListItem(
+                date=d,
+                digest=c.content,
+                recording_count=int(meta.get("recording_count", 0)),
+                source=str(meta.get("source", "llm")),
+            )
+        )
+    items.sort(key=lambda x: x.date, reverse=True)
+    items = items[:days]
+    return DigestListResponse(digests=items, total=len(items))
+
+
 class RecordingItem(BaseModel):
     plaud_id: str
     title: str | None

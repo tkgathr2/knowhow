@@ -18,6 +18,9 @@
   .md p { font-size: 0.9rem; line-height: 1.7; color: #334155; margin: 0.3rem 0; }
   .md strong { color: #0f172a; }
   .tag { display:inline-block; padding:1px 8px; border-radius:9999px; font-size:0.7rem; font-weight:500; }
+  .seg { padding: 4px 12px; font-size: 0.78rem; font-weight: 500; border-radius: 8px; cursor: pointer; transition: all 0.15s; background: #f3f4f6; color: #6b7280; }
+  .seg.active { background: #7c3aed; color: white; }
+  .seg:not(.active):hover { background: #e5e7eb; }
 </style>
 </head>
 <body class="bg-gray-50 text-gray-900 min-h-screen">
@@ -44,17 +47,28 @@
 
 <div class="max-w-4xl mx-auto px-4 py-6 space-y-8">
 
-  <!-- 日次ダイジェスト -->
+  <!-- 数日分まとめて -->
   <section>
     <div class="flex items-center gap-2 mb-3 flex-wrap">
-      <h2 class="text-base font-bold text-gray-800">📝 その日のダイジェスト</h2>
+      <h2 class="text-base font-bold text-gray-800">🗓️ 最近のダイジェスト</h2>
+      <span class="text-xs text-gray-400 mr-1">期間</span>
+      <span id="r-7" class="seg" onclick="setRange(7)">7日</span>
+      <span id="r-14" class="seg active" onclick="setRange(14)">14日</span>
+      <span id="r-30" class="seg" onclick="setRange(30)">30日</span>
+      <span class="text-xs text-gray-400 ml-1">録音から「決めたこと・約束・人物別」を自動でまとめます</span>
+    </div>
+    <div id="dg-list" class="space-y-3"></div>
+    <div id="dg-empty" class="hidden p-8 text-center text-gray-400 text-sm bg-white rounded-xl border border-gray-200">この期間のダイジェストはまだありません。</div>
+  </section>
+
+  <!-- 日付ジャンプ（1日分） -->
+  <section>
+    <div class="flex items-center gap-2 mb-3 flex-wrap">
+      <h2 class="text-base font-bold text-gray-800">📅 日付で見る</h2>
       <input id="dg-date" type="date" class="text-sm border border-gray-300 rounded-lg px-2 py-1">
       <button onclick="loadDigest()" class="text-sm px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition">表示</button>
-      <span class="text-xs text-gray-400">録音から「決めたこと・約束・人物別」を自動でまとめます</span>
     </div>
-    <div id="dg-box" class="bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-4">
-      <p class="text-sm text-gray-400">日付を選んで「表示」を押してください。</p>
-    </div>
+    <div id="dg-box" class="bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-4 hidden"></div>
   </section>
 
   <!-- 録音をさがす -->
@@ -98,9 +112,33 @@ async function loadAuth(){
   }
 }
 
+function digestCard(date, digestMd, recCount, source, open){
+  return `<details class="bg-white rounded-xl shadow-sm border border-gray-200 fade-in" ${open?'open':''}>
+    <summary class="cursor-pointer select-none px-5 py-3 font-semibold text-gray-800 flex items-center justify-between">
+      <span>${esc(date)}</span>
+      <span class="text-xs font-normal text-gray-400">録音 ${recCount} 件 ${source==='fallback'?'（簡易版）':''}</span>
+    </summary>
+    <div class="px-5 pb-4 md">${marked.parse(digestMd||'')}</div>
+  </details>`;
+}
+
+let range=14;
+function setRange(n){range=n;[7,14,30].forEach(k=>document.getElementById('r-'+k).classList.toggle('active',k===n));loadDigestList();}
+
+async function loadDigestList(){
+  const list=document.getElementById('dg-list');
+  const empty=document.getElementById('dg-empty');
+  list.innerHTML='<p class="text-sm text-gray-400">読み込み中…</p>';
+  const d=await getJSON('/api/koe/digests?days='+range);
+  if(!d||!d.digests||!d.digests.length){list.innerHTML='';empty.classList.remove('hidden');return;}
+  empty.classList.add('hidden');
+  list.innerHTML=d.digests.map((x,i)=>digestCard(x.date,x.digest,x.recording_count,x.source,i===0)).join('');
+}
+
 async function loadDigest(){
   const date=document.getElementById('dg-date').value;
   const box=document.getElementById('dg-box');
+  box.classList.remove('hidden');
   if(!date){box.innerHTML='<p class="text-sm text-gray-400">日付を選んでください。</p>';return;}
   box.innerHTML='<p class="text-sm text-gray-400">読み込み中…</p>';
   const d=await getJSON('/api/koe/digest?date='+date);
@@ -150,11 +188,10 @@ async function loadRecordings(){
 
 function init(){
   loadAuth();
-  // ダイジェストの初期日付：データのある最新日を狙って 2026-06-04、無ければ今日
   const today=new Date();const iso=today.toISOString().slice(0,10);
-  document.getElementById('dg-date').value='2026-06-04';
+  document.getElementById('dg-date').value=iso;
   document.getElementById('dg-date').max=iso;
-  loadDigest();
+  loadDigestList();   // 数日分まとめて（既定14日）
   loadRecordings();
 }
 init();

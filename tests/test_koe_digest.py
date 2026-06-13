@@ -196,6 +196,25 @@ def test_digest_get_none_when_absent():
     assert body["saved"] is False
 
 
+def test_digests_list_dedup_and_sort():
+    # 同日重複あり・日付バラバラ → 日付でユニーク化し新しい順
+    chunks = [
+        _Chunk("06-06版", {"date": "2026-06-06", "recording_count": 2, "source": "llm"}),
+        _Chunk("06-04版B", {"date": "2026-06-04", "recording_count": 1, "source": "llm"}),
+        _Chunk("06-04版A(古)", {"date": "2026-06-04", "recording_count": 1, "source": "llm"}),
+        _Chunk("06-05版", {"date": "2026-06-05", "recording_count": 3, "source": "fallback"}),
+    ]
+    sess = _FakeSession(chunks=chunks)
+    resp = _client(sess).get("/api/koe/digests", params={"days": 14})
+    assert resp.status_code == 200
+    body = resp.json()
+    dates = [d["date"] for d in body["digests"]]
+    assert dates == ["2026-06-06", "2026-06-05", "2026-06-04"]  # 新しい順・重複排除
+    # 06-04 は先に来た（=created_at降順で最新の）「版B」が採用される
+    d0604 = [d for d in body["digests"] if d["date"] == "2026-06-04"][0]
+    assert d0604["digest"] == "06-04版B"
+
+
 def test_digest_no_recordings_not_saved():
     sess = _FakeSession(recordings=[], utterances=[])
     resp = _client(sess).post("/api/koe/digest", json={"date": "2026-06-04"})
