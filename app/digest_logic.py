@@ -96,7 +96,10 @@ def fallback_digest(date: str, stats: dict, items: list[dict]) -> dict:
     if projects:
         top_pj, top_cnt = projects.most_common(1)[0]
         if len(projects) > 1:
-            parts.append(f"いちばん学びが多かった仕事は「{top_pj}」（{top_cnt}件）で、ほか{len(projects) - 1}分野でも知恵が増えています。")
+            parts.append(
+                f"いちばん学びが多かった仕事は「{top_pj}」（{top_cnt}件）で、"
+                f"ほか{len(projects) - 1}分野でも知恵が増えています。"
+            )
         else:
             parts.append(f"学びはすべて「{top_pj}」の仕事からです。")
     if recalled > 0:

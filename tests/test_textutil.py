@@ -1,7 +1,7 @@
 """app/textutil.py（UTF-8健全化）と修復ヘルパーの単体テスト。"""
 
-from app.textutil import sanitize_tags, sanitize_utf8
 from app.routers.intelligence import _repair_bytes
+from app.textutil import sanitize_tags, sanitize_utf8
 
 
 class TestSanitizeUtf8:

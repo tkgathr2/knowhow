@@ -6,7 +6,6 @@ import pytest
 
 from app.routers.nightly import attribute_outcome, clamp_delta
 
-
 # ---------------------------------------------------------------------------
 # attribute_outcome
 # ---------------------------------------------------------------------------
