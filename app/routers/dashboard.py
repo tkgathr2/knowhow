@@ -914,3 +914,66 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
         since=since.strftime("%Y-%m-%d"),
         buchos=[BuchoCard(**b) for b in buchos],
     )
+
+
+class BuchoDetailResponse(BaseModel):
+    key: str
+    name: str
+    title: str
+    emoji: str
+    domain: str
+    color: str
+    days: int
+    since: str
+    total: int
+    added: int
+    added_prev: int
+    growth_pct: float | None
+    recalls: int
+    monthly: list[dict]
+    recent_items: list[dict]
+    top_recalled: list[dict]
+    top_projects: list[dict]
+
+
+@router.get("/bucho/{key}", response_model=BuchoDetailResponse)
+async def get_bucho_detail(
+    key: str, days: int = 30, db: AsyncSession = Depends(get_db)
+) -> BuchoDetailResponse:
+    """1部長分の成長詳細（個別ページ用）。分類ロジックは /stats/bucho と同一。"""
+    if bucho_calc.bucho_def(key) is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="unknown bucho key")
+
+    days = max(1, min(days, 365))
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    prev_since = now - timedelta(days=days * 2)
+
+    # SQL側で文字列を切らない（left()はバイト切りで22021・本ファイル stats/bucho 参照）
+    rows = await db.execute(
+        select(
+            KbChunk.id,
+            KbChunk.project_key,
+            KbChunk.tags,
+            KbChunk.content,
+            KbChunk.created_at,
+            KbChunk.recall_count,
+        ).where(KbChunk.source_type != _LOG_SOURCE, KbChunk.is_deprecated.is_(False))
+    )
+    data = [
+        {
+            "chunk_id": r.id,
+            "project_key": r.project_key,
+            "tags": r.tags or [],
+            "content_head": (r.content or "")[:200],
+            "created_at": r.created_at.isoformat() if r.created_at else "",
+            "recall_count": r.recall_count or 0,
+        }
+        for r in rows
+    ]
+    det = bucho_calc.detail(
+        data, key, since.isoformat(), prev_since.isoformat(), now.strftime("%Y-%m")
+    )
+    return BuchoDetailResponse(days=days, since=since.strftime("%Y-%m-%d"), **det)

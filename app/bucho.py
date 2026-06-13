@@ -101,3 +101,97 @@ def aggregate(rows: list[dict], since_iso: str, prev_since_iso: str) -> list[dic
         growth_pct = round((s["added"] - prev) / prev * 100, 1) if prev > 0 else None
         out.append({**d, **s, "growth_pct": growth_pct})
     return out
+
+
+def bucho_def(key: str) -> dict | None:
+    for d in BUCHO_DEFS:
+        if d["key"] == key:
+            return d
+    return None
+
+
+def month_labels(now_month: str, n: int = 6) -> list[str]:
+    """now_month='YYYY-MM' から過去 n ヶ月分のラベルを古い順で返す。"""
+    year, month = (int(x) for x in now_month.split("-"))
+    out: list[str] = []
+    for _ in range(n):
+        out.append(f"{year:04d}-{month:02d}")
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+    return list(reversed(out))
+
+
+def detail(
+    rows: list[dict],
+    key: str,
+    since_iso: str,
+    prev_since_iso: str,
+    now_month: str,
+    recent_n: int = 20,
+    top_n: int = 10,
+) -> dict | None:
+    """1部長分の詳細（統計＋月次推移＋最近の学び＋よく使われる知恵＋仕事内訳）。
+
+    rows: {chunk_id, project_key, tags, content_head, created_at(ISO), recall_count}
+    """
+    d = bucho_def(key)
+    if d is None:
+        return None
+
+    mine = [
+        r for r in rows
+        if classify(r.get("project_key", ""), r.get("tags"), r.get("content_head", "")) == key
+    ]
+
+    total = len(mine)
+    added = sum(1 for r in mine if str(r.get("created_at") or "") >= since_iso)
+    added_prev = sum(
+        1 for r in mine
+        if prev_since_iso <= str(r.get("created_at") or "") < since_iso
+    )
+    recalls = sum(int(r.get("recall_count") or 0) for r in mine)
+    growth_pct = round((added - added_prev) / added_prev * 100, 1) if added_prev > 0 else None
+
+    months = month_labels(now_month)
+    monthly_map = {m: 0 for m in months}
+    for r in mine:
+        m = str(r.get("created_at") or "")[:7]
+        if m in monthly_map:
+            monthly_map[m] += 1
+    monthly = [{"period": m, "added": monthly_map[m]} for m in months]
+
+    recent = sorted(mine, key=lambda r: str(r.get("created_at") or ""), reverse=True)[:recent_n]
+    top_recalled = sorted(
+        (r for r in mine if int(r.get("recall_count") or 0) > 0),
+        key=lambda r: int(r.get("recall_count") or 0),
+        reverse=True,
+    )[:top_n]
+
+    from collections import Counter
+
+    pj = Counter(r.get("project_key", "") for r in mine if r.get("project_key"))
+    top_projects = [{"project_key": k, "count": c} for k, c in pj.most_common(5)]
+
+    def _item(r: dict) -> dict:
+        return {
+            "chunk_id": r.get("chunk_id"),
+            "project_key": r.get("project_key", ""),
+            "preview": (r.get("content_head") or "")[:160],
+            "tags": (r.get("tags") or [])[:6],
+            "created_at": str(r.get("created_at") or "")[:10],
+            "recall_count": int(r.get("recall_count") or 0),
+        }
+
+    return {
+        **d,
+        "total": total,
+        "added": added,
+        "added_prev": added_prev,
+        "growth_pct": growth_pct,
+        "recalls": recalls,
+        "monthly": monthly,
+        "recent_items": [_item(r) for r in recent],
+        "top_recalled": [_item(r) for r in top_recalled],
+        "top_projects": top_projects,
+    }

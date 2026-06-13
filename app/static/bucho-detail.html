@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノウハウキング君 — 部長の成長</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 9999px; font-size: 0.7rem; font-weight: 500; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="/bucho" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">← 部長一覧</a>
+      <h1 id="page-title" class="text-lg font-bold text-gray-900">部長の成長</h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/growth" class="text-sm px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition">グラフ</a>
+      <a href="/daily" class="text-sm px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition">毎日ログ</a>
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-5xl mx-auto px-4 py-6 space-y-5">
+
+  <div id="hero" class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 fade-in">読み込み中...</div>
+
+  <div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">毎月どれだけ知恵が増えたか（直近6ヶ月）</h2>
+    <p class="text-xs text-gray-400 mb-3">この部長の領域で増えた知恵の数</p>
+    <div style="position:relative;height:220px;"><canvas id="monthChart"></canvas></div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+      <h2 class="font-semibold text-sm text-gray-700 mb-1">よく使われている知恵ベスト</h2>
+      <p class="text-xs text-gray-400 mb-3">AIが何度も思い出して使った、いちばん役立っている知識</p>
+      <div id="topRecalled" class="space-y-2.5"></div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+      <h2 class="font-semibold text-sm text-gray-700 mb-1">どの仕事から学んだか</h2>
+      <p class="text-xs text-gray-400 mb-3">知恵の出どころ（仕事・システム別）</p>
+      <div id="topProjects" class="space-y-2"></div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">最近の学び</h2>
+    <p class="text-xs text-gray-400 mb-3">この部長の領域で新しく増えた知恵（新しい順）</p>
+    <div id="recentItems" class="divide-y divide-gray-50"></div>
+  </div>
+
+</div>
+
+<footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">ノウハウキング君 — 部長別の成長</footer>
+
+<script>
+const API = window.location.origin;
+const KEY = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
+let monthChart;
+
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function fmt(n){return n==null?'-':Number(n).toLocaleString('ja-JP');}
+async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
+
+const TAGCOLORS=['bg-blue-100 text-blue-700','bg-green-100 text-green-700','bg-purple-100 text-purple-700','bg-orange-100 text-orange-700','bg-pink-100 text-pink-700','bg-teal-100 text-teal-700'];
+function tagColor(t){let h=0;for(let i=0;i<t.length;i++)h=((h<<5)-h+t.charCodeAt(i))|0;return TAGCOLORS[Math.abs(h)%TAGCOLORS.length];}
+
+function statCard(label,value,sub,color){
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 fade-in">
+    <div class="text-xs text-gray-500">${esc(label)}</div>
+    <div class="text-2xl font-bold mt-0.5" style="color:${color||'#111827'}">${value}</div>
+    <div class="text-xs mt-0.5 text-gray-400">${sub||''}</div>
+  </div>`;
+}
+
+async function loadAuth(){
+  const d=await api('/auth/me');
+  if(d&&d.oauth_enabled&&d.user){
+    document.getElementById('auth-user').textContent=d.user;
+    const b=document.getElementById('auth-box');b.classList.remove('hidden');b.classList.add('flex');
+  }
+}
+
+async function load(){
+  loadAuth();
+  const d=await api('/api/bucho/'+encodeURIComponent(KEY)+'?days=30');
+  if(!d){document.getElementById('hero').innerHTML='<p class="text-sm text-gray-400">この部長は見つかりませんでした。<a href="/bucho" class="text-indigo-500 underline">部長一覧へ</a></p>';return;}
+
+  document.title=`ノウハウキング君 — ${d.name}の成長`;
+  document.getElementById('page-title').textContent=`${d.name}の成長`;
+
+  const g=d.growth_pct;
+  const trend=g==null?'' :(g>=0?`<span class="text-emerald-600 font-semibold">↑ 前の30日より +${g}%</span>`
+                                :`<span class="text-red-500 font-semibold">↓ 前の30日より ${g}%</span>`);
+  document.getElementById('hero').innerHTML=`
+    <div class="flex items-center gap-4 flex-wrap">
+      <span class="text-6xl">${d.emoji}</span>
+      <div class="min-w-0">
+        <div class="text-2xl font-bold text-gray-900">${esc(d.name)}</div>
+        <div class="text-sm text-gray-400">${esc(d.title)}・${esc(d.domain)}</div>
+        <div class="text-sm mt-1">${trend}</div>
+      </div>
+      <div class="ml-auto text-right">
+        <div class="text-5xl font-bold" style="color:${d.color}">+${fmt(d.added)}</div>
+        <div class="text-sm text-gray-500">件の知恵（この30日）</div>
+      </div>
+    </div>`;
+
+  document.getElementById('stats').innerHTML=[
+    statCard('これまでにたまった知恵', fmt(d.total)+'<span class="text-xs text-gray-400"> 件</span>', 'この部長の領域の知識の合計', d.color),
+    statCard('この30日で増えた', '+'+fmt(d.added)+'<span class="text-xs text-gray-400"> 件</span>', `その前の30日は +${fmt(d.added_prev)}件`),
+    statCard('知恵が役立った回数', fmt(d.recalls)+'<span class="text-xs text-gray-400"> 回</span>', 'AIが思い出して実際に使った回数'),
+    statCard('伸び率', d.growth_pct==null?'新規':(d.growth_pct>=0?'+':'')+d.growth_pct+'%', '前の30日とくらべて'),
+  ].join('');
+
+  const labels=d.monthly.map(m=>m.period);
+  const data=d.monthly.map(m=>m.added);
+  if(monthChart)monthChart.destroy();
+  monthChart=new Chart(document.getElementById('monthChart'),{
+    type:'bar',
+    data:{labels,datasets:[{label:'増えた知恵',data,backgroundColor:d.color+'CC',borderColor:d.color,borderWidth:1,borderRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
+  });
+
+  const tr=d.top_recalled||[];
+  const maxR=Math.max(1,...tr.map(t=>t.recall_count));
+  document.getElementById('topRecalled').innerHTML= tr.length ? tr.map(t=>`
+    <div class="flex items-center gap-3">
+      <span class="w-12 text-right text-xs font-semibold text-emerald-600">🔁${fmt(t.recall_count)}</span>
+      <span class="flex-1 min-w-0">
+        <span class="text-xs text-gray-400">${esc(t.project_key)}</span>
+        <span class="block text-sm text-gray-700 truncate">${esc(t.preview)}</span>
+      </span>
+      <span class="w-14 h-2 bg-gray-100 rounded overflow-hidden flex-shrink-0"><span style="display:block;height:100%;width:${Math.round(t.recall_count/maxR*100)}%;background:${d.color};"></span></span>
+    </div>`).join('') : '<p class="text-xs text-gray-400">まだ使われた知恵がありません</p>';
+
+  const tp=d.top_projects||[];
+  const maxP=Math.max(1,...tp.map(p=>p.count));
+  document.getElementById('topProjects').innerHTML= tp.length ? tp.map(p=>`
+    <div class="flex items-center gap-3">
+      <span class="w-40 text-xs text-gray-600 truncate" title="${esc(p.project_key)}">${esc(p.project_key)}</span>
+      <span class="flex-1 h-3.5 bg-gray-100 rounded overflow-hidden"><span style="display:block;height:100%;width:${Math.round(p.count/maxP*100)}%;background:${d.color};border-radius:4px;"></span></span>
+      <span class="w-12 text-right text-xs font-semibold text-gray-700">${fmt(p.count)}</span>
+    </div>`).join('') : '<p class="text-xs text-gray-400">データなし</p>';
+
+  const ri=d.recent_items||[];
+  document.getElementById('recentItems').innerHTML= ri.length ? ri.map(it=>`
+    <div class="py-2.5">
+      <div class="flex items-center gap-2 mb-1 flex-wrap">
+        <span class="text-xs text-gray-400">${esc(it.created_at)}</span>
+        <span class="text-xs text-gray-500">${esc(it.project_key)}</span>
+        ${it.recall_count>0?`<span class="text-xs text-emerald-600">🔁 ${fmt(it.recall_count)}回使われた</span>`:''}
+      </div>
+      <div class="text-sm text-gray-700">${esc(it.preview)}</div>
+      <div class="flex gap-1 mt-1 flex-wrap">${(it.tags||[]).map(t=>`<span class="tag ${tagColor(t)}">${esc(t)}</span>`).join('')}</div>
+    </div>`).join('') : '<p class="text-xs text-gray-400 py-2">この30日の新しい学びはありません</p>';
+}
+
+load();
+</script>
+</body>
+</html>

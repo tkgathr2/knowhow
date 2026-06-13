@@ -128,6 +128,16 @@ async def daily_page():
     return FileResponse(_STATIC_DIR / "daily.html")
 
 
+@app.get("/bucho", include_in_schema=False)
+async def bucho_page():
+    return FileResponse(_STATIC_DIR / "bucho.html")
+
+
+@app.get("/bucho/{key}", include_in_schema=False)
+async def bucho_detail_page(key: str):
+    return FileResponse(_STATIC_DIR / "bucho-detail.html")
+
+
 @app.get("/token-cutter", include_in_schema=False)
 async def token_cutter_page():
     return FileResponse(_STATIC_DIR / "token-cutter.html")
