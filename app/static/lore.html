@@ -174,7 +174,7 @@ async function loadDigestList(){
   const d=await getJSON('/api/koe/digests?days='+range);
   if(!d||!d.digests||!d.digests.length){list.innerHTML='';empty.classList.remove('hidden');return d?d.total:0;}
   empty.classList.add('hidden');
-  list.innerHTML=d.digests.map((x,i)=>digestCard(x.date,x.digest,x.recording_count,x.source,i===0)).join('');
+  list.innerHTML=d.digests.map((x,i)=>digestCard(x.date,x.digest,x.recording_count,x.source,true)).join('');
   return d.total;
 }
 
