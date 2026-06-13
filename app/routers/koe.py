@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import koe_chunk, koe_digest, koe_logic, koe_tag
+from app import koe_chunk, koe_digest, koe_filter, koe_logic, koe_tag
 from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
@@ -38,7 +38,8 @@ router = APIRouter(tags=["koe"])
 _WRITE_GUARD = [Depends(require_api_key)]
 
 # 「確定済み」とみなす状態（watermark が既取込として扱う＝再送しない）
-_CONFIRMED = ("ingested", "empty")
+# noise＝会話でない（機内アナウンス・PA・環境音）。台帳には残すが検索/ダイジェスト対象外。
+_CONFIRMED = ("ingested", "empty", "noise")
 
 # プロダクト名「ロア（Lore）」。録音由来の検索資産はこの project_key で kb_chunks に相乗りする。
 LORE_PROJECT = "lore"
@@ -119,21 +120,24 @@ async def _add_utterances(db: AsyncSession, recording_id: int, utt_rows: list[di
 
 
 async def _handle_existing(
-    db: AsyncSession, rec: KbRecording, utt_rows: list[dict], status: str, speakers: list[str], unknown: list[str]
+    db: AsyncSession, rec: KbRecording, utt_rows: list[dict], status: str,
+    speakers: list[str], unknown: list[str], filter_meta: dict | None = None,
 ) -> KoeIngestResponse:
-    # すでに確定済み（ingested/empty）の再送 → 何もしない（冪等）
+    # すでに確定済み（ingested/empty/noise）の再送 → 何もしない（冪等）
     if rec.transcript_status in _CONFIRMED:
         count = await _count_utts(db, rec.id)
         return _resp(rec, "already_ingested", count, list(rec.speaker_set or []), [])
 
-    # ここまで来た rec は pending。新payloadが確定情報（ingested/empty）を持つなら昇格する
+    # ここまで来た rec は pending。新payloadが確定情報（ingested/empty/noise）を持つなら昇格する
     if status != "pending":
         await _add_utterances(db, rec.id, utt_rows)
         rec.transcript_status = status
         rec.speaker_set = speakers
         rec.ingested_at = datetime.now(UTC)
+        new_meta = {**(rec.meta or {}), **(filter_meta or {})}
         if unknown:
-            rec.meta = {**(rec.meta or {}), "unknown_speakers": unknown}
+            new_meta["unknown_speakers"] = unknown
+        rec.meta = new_meta
         await db.commit()
         await db.refresh(rec)
         return _resp(rec, "upgraded", len(utt_rows), speakers, unknown)
@@ -148,13 +152,24 @@ async def koe_ingest(req: KoeIngestRequest, db: AsyncSession = Depends(get_db)) 
     seg_dicts = [s.model_dump() for s in req.segments]
     utt_rows = koe_logic.build_utterances(seg_dicts, aliases)
     status = koe_logic.decide_status(req.has_transcript, len(utt_rows))
+    # 会話フィルタ：機内アナウンス・PA・環境音など「会話でない」録音は noise にして
+    # チャンク化・ダイジェストの対象から外す（社長の実会話だけをロアに残す）。
+    filter_meta: dict = {}
+    if status == "ingested":
+        is_conv, reason, score = koe_filter.is_conversation(utt_rows)
+        filter_meta = {"filter": reason, "conv_score": score}
+        if not is_conv:
+            status = "noise"
     speakers = koe_logic.speaker_set(utt_rows)
     unknown = koe_logic.unknown_speakers(utt_rows, aliases)
 
     rec = await _fetch(db, req.plaud_id)
     if rec is not None:
-        return await _handle_existing(db, rec, utt_rows, status, speakers, unknown)
+        return await _handle_existing(db, rec, utt_rows, status, speakers, unknown, filter_meta)
 
+    base_meta = {**req.meta, **filter_meta}
+    if unknown:
+        base_meta["unknown_speakers"] = unknown
     # 新規。pending のときは台帳のみ（発話なし・ingested_at なし）→ watermark から外れ翌日再送される
     rec = KbRecording(
         plaud_id=req.plaud_id,
@@ -163,7 +178,7 @@ async def koe_ingest(req: KoeIngestRequest, db: AsyncSession = Depends(get_db)) 
         duration_minutes=req.duration_minutes,
         transcript_status=status,
         speaker_set=speakers,
-        meta={**req.meta, "unknown_speakers": unknown} if unknown else req.meta,
+        meta=base_meta,
         ingested_at=datetime.now(UTC) if status in _CONFIRMED else None,
     )
     db.add(rec)
@@ -177,7 +192,7 @@ async def koe_ingest(req: KoeIngestRequest, db: AsyncSession = Depends(get_db)) 
         rec = await _fetch(db, req.plaud_id)
         if rec is None:
             raise
-        return await _handle_existing(db, rec, utt_rows, status, speakers, unknown)
+        return await _handle_existing(db, rec, utt_rows, status, speakers, unknown, filter_meta)
 
     await db.refresh(rec)
     return _resp(rec, status, len(utt_rows), speakers, unknown)
