@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import koe_chunk, koe_digest, koe_logic, koe_tag
+from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
 from app.embedding import create_embedding
@@ -30,6 +31,11 @@ from app.models import KbChunk, KbRecording, KbSpeakerAlias, KbUtterance
 _JST = timezone(timedelta(hours=9))
 
 router = APIRouter(tags=["koe"])
+
+# 書き込み系（取込・処理・生成）に付ける X-API-Key 必須ガード。
+# 読み取り系（GET digest / recordings）は router では保護せず、ブラウザは Google ログイン
+# （middleware）で、バッチは X-API-Key で読む（main.py / middleware.py 参照）。
+_WRITE_GUARD = [Depends(require_api_key)]
 
 # 「確定済み」とみなす状態（watermark が既取込として扱う＝再送しない）
 _CONFIRMED = ("ingested", "empty")
@@ -136,7 +142,7 @@ async def _handle_existing(
     return _resp(rec, "still_pending", 0, list(rec.speaker_set or []), [])
 
 
-@router.post("/koe/ingest", response_model=KoeIngestResponse)
+@router.post("/koe/ingest", response_model=KoeIngestResponse, dependencies=_WRITE_GUARD)
 async def koe_ingest(req: KoeIngestRequest, db: AsyncSession = Depends(get_db)) -> KoeIngestResponse:
     aliases = await _load_aliases(db)
     seg_dicts = [s.model_dump() for s in req.segments]
@@ -250,7 +256,7 @@ async def _fetch_utterances(db: AsyncSession, recording_id: int) -> list[dict]:
     ]
 
 
-@router.post("/koe/process", response_model=ProcessResponse)
+@router.post("/koe/process", response_model=ProcessResponse, dependencies=_WRITE_GUARD)
 async def koe_process(req: ProcessRequest, db: AsyncSession = Depends(get_db)) -> ProcessResponse:
     """取込済み録音を話題チャンク化→話題タグ→embedding して kb_chunks(project='lore') に保存。
 
@@ -354,7 +360,7 @@ async def _recordings_on(db: AsyncSession, d: date_cls) -> list[KbRecording]:
     return list(rows.scalars())
 
 
-@router.post("/koe/digest", response_model=DigestResponse)
+@router.post("/koe/digest", response_model=DigestResponse, dependencies=_WRITE_GUARD)
 async def koe_digest_generate(req: DigestRequest, db: AsyncSession = Depends(get_db)) -> DigestResponse:
     """指定日(JST)の録音をまとめて経営ダイジェストを生成（save=True で kb_chunks に保存）。"""
     date_label = req.date.isoformat()
