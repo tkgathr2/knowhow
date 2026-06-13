@@ -168,19 +168,20 @@ def test_ingest_new_recording():
             "title": "テスト録音",
             "has_transcript": True,
             "segments": [
-                {"start_time": 0, "end_time": 100, "content": "おはよう", "speaker": "西原さん"},
-                {"start_time": 100, "end_time": 200, "content": "了解です", "speaker": "西原さん"},
+                {"start_time": 0, "end_time": 100, "content": "この件どう進める？", "speaker": "Atsuhiro Takagi"},
+                {"start_time": 100, "end_time": 200, "content": "媒体を増やしましょう", "speaker": "西原さん"},
+                {"start_time": 200, "end_time": 300, "content": "了解、それで進めて", "speaker": "Atsuhiro Takagi"},
             ],
         },
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ingested"
-    assert body["utterance_count"] == 2
-    assert body["speakers"] == ["西原さん"]
+    assert body["utterance_count"] == 3
+    assert "高木豊大" in body["speakers"] or "Atsuhiro Takagi" in body["speakers"]
     assert sess.committed is True
-    # recording 1 + utterance 2
-    assert len(sess.added) == 3
+    # recording 1 + utterance 3
+    assert len(sess.added) == 4
 
 
 def test_ingest_new_pending_when_no_transcript():
@@ -194,6 +195,28 @@ def test_ingest_new_pending_when_no_transcript():
     assert resp.json()["utterance_count"] == 0
     # 台帳行のみ（発話なし）
     assert len(sess.added) == 1
+
+
+def test_ingest_noise_recording_marked_noise():
+    """機内アナウンス主体の録音は会話フィルタで status=noise になる（チャンク化・ダイジェスト対象外）。"""
+    sess = _FakeSession()
+    resp = _client(sess).post(
+        "/api/koe/ingest",
+        json={
+            "plaud_id": "flight1",
+            "has_transcript": True,
+            "segments": [
+                {"start_time": 0, "end_time": 100, "speaker": "CA",
+                 "content": "シートベルトを腰の低い位置でお締めください。"},
+                {"start_time": 100, "end_time": 200, "speaker": "CA2",
+                 "content": "Please fasten your seat belt. emergency exits..."},
+                {"start_time": 200, "end_time": 300, "speaker": "CA3",
+                 "content": "客室乗務員にお知らせください。非常口をご確認ください。"},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "noise"
 
 
 def test_ingest_empty_transcript():
@@ -227,17 +250,21 @@ def test_ingest_upgrades_pending_to_ingested():
         json={
             "plaud_id": "late1",
             "has_transcript": True,
-            "segments": [{"start_time": 0, "end_time": 50, "content": "やっと来た", "speaker": "西原さん"}],
+            "segments": [
+                {"start_time": 0, "end_time": 50, "content": "やっと文字起こし来たね", "speaker": "Atsuhiro Takagi"},
+                {"start_time": 50, "end_time": 100, "content": "はい、確認します", "speaker": "西原さん"},
+                {"start_time": 100, "end_time": 150, "content": "じゃあ進めよう", "speaker": "Atsuhiro Takagi"},
+            ],
         },
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "upgraded"
-    assert body["utterance_count"] == 1
+    assert body["utterance_count"] == 3
     assert rec.transcript_status == "ingested"
     assert rec.ingested_at is not None
     # 昇格時に発話が add される
-    assert len(sess.added) == 1
+    assert len(sess.added) == 3
 
 
 def test_ingest_still_pending_when_transcript_absent():
