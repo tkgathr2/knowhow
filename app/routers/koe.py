@@ -20,14 +20,19 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import koe_logic
+from app import koe_chunk, koe_logic, koe_tag
+from app.config import settings
 from app.database import get_db
-from app.models import KbRecording, KbSpeakerAlias, KbUtterance
+from app.embedding import create_embedding
+from app.models import KbChunk, KbRecording, KbSpeakerAlias, KbUtterance
 
 router = APIRouter(tags=["koe"])
 
 # 「確定済み」とみなす状態（watermark が既取込として扱う＝再送しない）
 _CONFIRMED = ("ingested", "empty")
+
+# プロダクト名「ロア（Lore）」。録音由来の検索資産はこの project_key で kb_chunks に相乗りする。
+LORE_PROJECT = "lore"
 
 
 class Segment(BaseModel):
@@ -170,6 +175,140 @@ async def _add_utterances_via_flush(db: AsyncSession, rec: KbRecording, utt_rows
     """新規録音の発話を追加。FK を解決するため recording を flush して id を採番してから紐づける。"""
     await db.flush()
     await _add_utterances(db, rec.id, utt_rows)
+
+
+# --- チャンク化＋話題タグ＋embedding（kb_chunks 相乗り）。Plaud同期と独立に動かせる ---
+
+
+class ProcessRequest(BaseModel):
+    plaud_id: str | None = None  # 指定でその1件、未指定で未処理を limit 件
+    limit: int = Field(default=20, ge=1, le=200)
+    max_chars: int = Field(default=koe_chunk.DEFAULT_MAX_CHARS, ge=200, le=8000)
+
+
+class ProcessResult(BaseModel):
+    plaud_id: str
+    status: str  # processed | skipped | no_utterances
+    chunk_count: int
+
+
+class ProcessResponse(BaseModel):
+    results: list[ProcessResult]
+    total: int
+
+
+async def _count_chunks(db: AsyncSession, recording_id: int) -> int:
+    rows = await db.execute(
+        select(func.count())
+        .select_from(KbChunk)
+        .where(
+            KbChunk.project_key == LORE_PROJECT,
+            KbChunk.source_type == "recording",
+            KbChunk.source_id == recording_id,
+        )
+    )
+    return int(rows.scalar() or 0)
+
+
+async def _select_process_targets(db: AsyncSession, plaud_id: str | None, limit: int) -> list[KbRecording]:
+    if plaud_id:
+        rows = await db.execute(select(KbRecording).where(KbRecording.plaud_id == plaud_id))
+        rec = rows.scalar_one_or_none()
+        return [rec] if rec else []
+    # ingested かつ まだ kb_chunks に無い録音だけを対象（empty は本文が無いのでチャンク不要）
+    already = select(KbChunk.source_id).where(
+        KbChunk.project_key == LORE_PROJECT, KbChunk.source_type == "recording"
+    )
+    rows = await db.execute(
+        select(KbRecording)
+        .where(KbRecording.transcript_status == "ingested", KbRecording.id.notin_(already))
+        .order_by(KbRecording.recorded_at.desc().nullslast())
+        .limit(limit)
+    )
+    return list(rows.scalars())
+
+
+async def _fetch_utterances(db: AsyncSession, recording_id: int) -> list[dict]:
+    rows = await db.execute(
+        select(KbUtterance).where(KbUtterance.recording_id == recording_id).order_by(KbUtterance.seq)
+    )
+    return [
+        {
+            "seq": u.seq,
+            "speaker": u.speaker,
+            "start_ms": u.start_ms,
+            "end_ms": u.end_ms,
+            "content": u.content,
+        }
+        for u in rows.scalars()
+    ]
+
+
+@router.post("/koe/process", response_model=ProcessResponse)
+async def koe_process(req: ProcessRequest, db: AsyncSession = Depends(get_db)) -> ProcessResponse:
+    """取込済み録音を話題チャンク化→話題タグ→embedding して kb_chunks(project='lore') に保存。
+
+    冪等：既にチャンクがある録音は skip。LLMタグ/embedding はベストエフォート（失敗しても保存）。
+    """
+    targets = await _select_process_targets(db, req.plaud_id, req.limit)
+    results: list[ProcessResult] = []
+
+    for rec in targets:
+        if await _count_chunks(db, rec.id) > 0:
+            results.append(ProcessResult(plaud_id=rec.plaud_id, status="skipped", chunk_count=0))
+            continue
+
+        utterances = await _fetch_utterances(db, rec.id)
+        if not utterances:
+            results.append(ProcessResult(plaud_id=rec.plaud_id, status="no_utterances", chunk_count=0))
+            continue
+
+        chunks = koe_chunk.chunk_utterances(utterances, req.max_chars)
+        recorded_at_str = str(rec.recorded_at) if rec.recorded_at else None
+        count = 0
+        for ch in chunks:
+            content = koe_chunk.build_chunk_content(ch, rec.title, rec.recorded_at)
+            tags = await koe_tag.tag_chunk(content)
+            embedding = None
+            try:
+                embedding = await create_embedding(content)
+            except Exception:
+                embedding = None
+
+            chunk = KbChunk(
+                project_key=LORE_PROJECT,
+                source_type="recording",
+                source_id=rec.id,
+                chunk_type="recording",
+                content=content,
+                tags=tags,
+                # 録音は「社長が実際に話した事実」＝高信頼。検索閾値(0.70)を超える値を与える（HO-83の罠回避）
+                importance_score=6,
+                confidence_score=0.9,
+                alpha=9.0,
+                beta=1.0,
+                meta={
+                    "plaud_id": rec.plaud_id,
+                    "recorded_at": recorded_at_str,
+                    "speakers": ch["speakers"],
+                    "topic_tags": tags,
+                    "start_ms": ch["start_ms"],
+                    "end_ms": ch["end_ms"],
+                    "seq_start": ch["seq_start"],
+                    "seq_end": ch["seq_end"],
+                },
+            )
+            if embedding is not None:
+                chunk.embedding = embedding
+                chunk.embedding_model = settings.embedding_model
+                chunk.embedding_dimensions = settings.embedding_dim
+            db.add(chunk)
+            count += 1
+
+        await db.commit()
+        results.append(ProcessResult(plaud_id=rec.plaud_id, status="processed", chunk_count=count))
+
+    return ProcessResponse(results=results, total=len(results))
 
 
 class RecordingItem(BaseModel):
