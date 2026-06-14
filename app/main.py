@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -33,6 +34,7 @@ from app.routers import (
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _logger = logging.getLogger(__name__)
+_background_tasks: set = set()  # 背景タスクの強参照保持（GCで消えるのを防ぐ）
 
 
 def _run_migrations() -> None:
@@ -69,6 +71,20 @@ def _run_migrations() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _run_migrations()
+    # らんさ〜ず知見の冪等シード（社長依頼 2026-06-14）。起動をブロックしないよう背景タスクで実行。
+    try:
+        from app.seed_ranraners import maybe_seed_ranraners
+
+        task = asyncio.create_task(maybe_seed_ranraners())
+        _background_tasks.add(task)
+        task.add_done_callback(
+            lambda t: (
+                _background_tasks.discard(t),
+                t.cancelled() or (t.exception() and _logger.warning("ranraners seed task failed: %s", t.exception())),
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("ranraners seed scheduling failed (ignored): %s", e)
     yield
 
 
