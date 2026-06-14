@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import digest_logic
 from app.auth import require_api_key
 from app.config import settings
-from app.database import get_db
+from app.database import async_session, get_db
 from app.models import KbChunk
 
 router = APIRouter(tags=["digest"])
@@ -177,8 +177,20 @@ async def _generate(db: AsyncSession, d: date, use_llm: bool) -> dict:
             "model": model, "is_final": is_final, "stats": stats}
 
 
+async def _bg_generate_llm(dates: list[date]) -> None:
+    """レスポンス返却後に、別セッションで重いLLM生成を裏で回す（GETを待たせない）。"""
+    async with async_session() as bdb:
+        for d in dates:
+            try:
+                await _generate(bdb, d, use_llm=True)
+            except Exception as e:  # 失敗しても表示は止めない
+                _logger.warning("bg digest gen failed for %s: %s", d, e)
+
+
 @router.get("/digest/daily", response_model=DigestResponse)
-async def get_daily_digests(days: int = 14, db: AsyncSession = Depends(get_db)) -> DigestResponse:
+async def get_daily_digests(
+    background: BackgroundTasks, days: int = 14, db: AsyncSession = Depends(get_db)
+) -> DigestResponse:
     days = max(1, min(days, 60))
     today = datetime.now(timezone.utc).date()
     wanted = [today - timedelta(days=i) for i in range(days)]
@@ -202,25 +214,27 @@ async def get_daily_digests(days: int = 14, db: AsyncSession = Depends(get_db)) 
             "_updated_at": r.updated_at,
         }
 
-    # 生成が必要な日：未保存の日＋当日(暫定)が古い場合。LLMは新しい日から最大3日分。
+    # 速度優先: GET 内では重いLLMを回さない。
+    # 未保存の日だけ「ルールベース（DBカウントのみ・高速）」で即作って表示を埋め、
+    # LLMでの読み応えある版は背後(BackgroundTasks)で生成して次回表示時に差し替える。
     now = datetime.now(timezone.utc)
-    to_generate: list[date] = []
-    for d in wanted:  # wanted は新しい順
-        ds = d.isoformat()
-        if ds not in stored:
-            to_generate.append(d)
-        elif not stored[ds]["is_final"]:
-            updated = stored[ds].get("_updated_at")
-            if updated is None or (now - updated).total_seconds() > _TODAY_REFRESH_MIN * 60:
-                to_generate.append(d)
+    missing = [d for d in wanted if d.isoformat() not in stored]
+    stale_today = [
+        d for d in wanted
+        if d.isoformat() in stored and not stored[d.isoformat()]["is_final"]
+        and (
+            stored[d.isoformat()].get("_updated_at") is None
+            or (now - stored[d.isoformat()]["_updated_at"]).total_seconds() > _TODAY_REFRESH_MIN * 60
+        )
+    ]
 
-    llm_budget = _MAX_LLM_PER_REQUEST
-    for d in to_generate:
-        use_llm = llm_budget > 0
-        entry = await _generate(db, d, use_llm=use_llm)
-        if entry["model"] != "rules":
-            llm_budget -= 1
+    for d in missing:  # ルールベース即時生成（ネットワーク無し＝速い）
+        entry = await _generate(db, d, use_llm=False)
         stored[entry["date"]] = entry
+
+    to_llm = (missing + stale_today)[:_MAX_LLM_PER_REQUEST]
+    if to_llm:
+        background.add_task(_bg_generate_llm, to_llm)
 
     entries = [
         DigestEntry(**{k: v for k, v in stored[d.isoformat()].items() if not k.startswith("_")})
