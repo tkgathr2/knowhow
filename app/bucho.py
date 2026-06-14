@@ -1,14 +1,17 @@
 """部長別ナレッジ集計の純粋ロジック（DB非依存・単体テスト可能）。
 
-5部長制（社長指示 2026/06/07）に沿って、ナレッジの1件1件を
-「どの部長の領域の知識か」に分類する。判定は
+専務＋9部長＋社長室室長＋全社共通の体制（2026-06-14時点）に沿って、ナレッジの1件1件を
+「どの役の領域の知識か」に分類する。判定は
 ①project_key の明示マップ → ②タグ/本文のキーワード → ③既定値 の順。
+専務 鷹司（senmu）は領域を持たないが、横断案件の裁定/完遂ログを senmu キーで集計し可視化する。
 """
 
 from __future__ import annotations
 
 # 部長の定義（表示順もこの順）
 BUCHO_DEFS: list[dict] = [
+    {"key": "senmu", "name": "鷹司 統", "title": "専務取締役（執行No.2）", "emoji": "🎩",
+     "domain": "全社統括・部長間の裁定・優先順位・完遂", "color": "#334155"},
     {"key": "sanada", "name": "真田 啓", "title": "開発部長", "emoji": "🛠️",
      "domain": "システム開発・AI・インフラ", "color": "#4f46e5"},
     {"key": "muroi", "name": "室井 剛", "title": "オペレーション部長（COO）", "emoji": "🔄",
@@ -37,6 +40,8 @@ BUCHO_KEYS = [b["key"] for b in BUCHO_DEFS]
 
 # ① project_key の明示マップ（開発システムは原則 真田）
 PROJECT_MAP: dict[str, str] = {
+    # 鷹司（専務＝全社統括・横断案件の裁定/完遂ログ）
+    "senmu-room": "senmu", "senmu": "senmu",
     # 真田（開発システム群）
     "knowhow": "sanada", "security-report-system": "sanada", "cast-meibo": "sanada",
     "recruit": "sanada", "takagi_iride": "sanada", "slack-mioshi": "sanada",
