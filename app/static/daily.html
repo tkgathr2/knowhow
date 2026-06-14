@@ -195,23 +195,34 @@ async function loadAuth(){
   }
 }
 
+let lastEntries=[];
+function renderTimeline(){
+  const tl=document.getElementById('timeline');
+  tl.innerHTML=lastEntries.map(dayBlock).join('');
+}
+
 async function load(){
   loadAuth();
   const tl=document.getElementById('timeline');
   const empty=document.getElementById('empty');
-  tl.innerHTML='<p class="text-sm text-gray-400">読み込み中…（初回はその日のまとめを作るため少し時間がかかります）</p>';
-  const [d,dg]=await Promise.all([
-    api('/api/growth/daily?days='+days),
-    api('/api/digest/daily?days='+days),
-  ]);
-  digests={};
-  if(dg&&dg.entries)dg.entries.forEach(x=>{digests[x.date]=x;});
+  tl.innerHTML='<p class="text-sm text-gray-400">読み込み中…</p>';
+  // ① まず数字・タグだけ即表示（まとめの生成は待たない）
+  const d=await api('/api/growth/daily?days='+days);
   if(!d){tl.innerHTML='<p class="text-sm text-gray-400">読み込みに失敗しました</p>';return;}
   document.getElementById('since').textContent=d.since+' 〜';
   renderHeadline(d.latest);
   if(!d.entries.length){tl.innerHTML='';empty.classList.remove('hidden');return;}
   empty.classList.add('hidden');
-  tl.innerHTML=d.entries.map(dayBlock).join('');
+  lastEntries=d.entries;
+  renderTimeline();
+  // ② まとめ（黄色い枠）は後から差し込む
+  api('/api/digest/daily?days='+days).then(dg=>{
+    if(dg&&dg.entries){
+      digests={};
+      dg.entries.forEach(x=>{digests[x.date]=x;});
+      renderTimeline();
+    }
+  });
 }
 
 load();
