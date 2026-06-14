@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -69,6 +70,13 @@ def _run_migrations() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _run_migrations()
+    # らんさ〜ず知見の冪等シード（社長依頼 2026-06-14）。起動をブロックしないよう背景タスクで実行。
+    try:
+        from app.seed_ranraners import maybe_seed_ranraners
+
+        asyncio.create_task(maybe_seed_ranraners())
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("ranraners seed scheduling failed (ignored): %s", e)
     yield
 
 
