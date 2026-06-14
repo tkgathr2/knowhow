@@ -19,6 +19,16 @@ BUCHO_DEFS: list[dict] = [
      "domain": "契約・法律・コンプライアンス", "color": "#be123c"},
     {"key": "todo", "name": "藤堂 一馬", "title": "経営管理部長", "emoji": "🧭",
      "domain": "戦略・人事・組織・リスク", "color": "#7c3aed"},
+    {"key": "kaburagi", "name": "鏑木 蓮", "title": "マーケティング部長（CMO）", "emoji": "📣",
+     "domain": "集客・広告・リード・CRM/LTV", "color": "#ea580c"},
+    {"key": "kuze", "name": "久世 澪", "title": "デザイン部長（CDO）", "emoji": "🎨",
+     "domain": "UI/UX・画面/LP設計・デザインシステム", "color": "#db2777"},
+    {"key": "kuon", "name": "久遠 颯", "title": "ブランディング部長（CBO）", "emoji": "✨",
+     "domain": "ブランド戦略・パーパス・ネーミング・トンマナ", "color": "#0891b2"},
+    {"key": "kagura", "name": "神楽 迅", "title": "AIDX部長（CAIO/CDXO）", "emoji": "🤖",
+     "domain": "生成AI活用・業務自動化・DX・データ基盤", "color": "#16a34a"},
+    {"key": "saotome", "name": "早乙女 静", "title": "社長室室長", "emoji": "🏛️",
+     "domain": "振り分け・司会・統合報告・抜け漏れの番人", "color": "#475569"},
     {"key": "common", "name": "全社共通", "title": "どの部にも効く知恵", "emoji": "🏢",
      "domain": "仕事の進め方・共通ノウハウ", "color": "#6b7280"},
 ]
@@ -43,8 +53,26 @@ PROJECT_MAP: dict[str, str] = {
     "monthly-cf": "kujo",
     # 藤堂（人事・組織）
     "kotsuyudo-hr-automation": "todo",
-    # 室井（現業オペ・見守り）
+    # 室井（現業オペ・見守り・総務）
     "ohayo-kazuko": "muroi", "kazuko_departure_watch": "muroi",
+    "soumu-room": "muroi", "muroi": "muroi",
+    # 九条（経営数字・財務）
+    "keiei-suji": "kujo", "keiei-zaimu": "kujo",
+    # 霧島（法務）
+    "keiei-houmu": "kirishima",
+    # 藤堂（経営管理6ラボ）
+    "keiei-senryaku": "todo", "keiei-kikaku": "todo", "keiei-soshiki": "todo",
+    "keiei-jinji": "todo", "keiei-risk": "todo", "keiei-tousei": "todo",
+    # 鏑木（マーケティング）
+    "marketing-room": "kaburagi", "lead-autogen": "kaburagi",
+    # 久世（デザイン）
+    "design-room": "kuze",
+    # 久遠（ブランディング）
+    "branding-room": "kuon",
+    # 神楽（AIDX）
+    "aidx-room": "kagura",
+    # 早乙女（社長室）
+    "hisho-room": "saotome", "hisho-shitsu": "saotome",
 }
 
 # project_key で決まらないときの既定値（cto-lab は全セッション混在 → キーワードで振り分け）
@@ -61,6 +89,15 @@ KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
               "離職", "定着", "教育", "在留資格", "外国人材", "面接")),
     ("muroi", ("総務", "オペレーション", "業務標準", "属人化", "現場", "勤怠", "シフト",
                "発注", "備品", "物品", "庶務", "体裁ルール", "納品物")),
+    ("kaburagi", ("集客", "広告", "運用型広告", "リード獲得", "LP", "ランディングページ",
+                  "CVR", "コンバージョン", "CRM", "LTV", "SEO", "SNS運用", "効果測定",
+                  "キャンペーン", "流入", "リスティング")),
+    ("kuze", ("UI", "UX", "デザインシステム", "ワイヤーフレーム", "プロトタイプ", "配色",
+              "トンマナ設計", "画面設計", "ビジュアル", "使いやすさ", "見た目", "レイアウト")),
+    ("kuon", ("ブランディング", "ブランド戦略", "パーパス", "ネーミング", "トンマナ",
+              "世界観", "スローガン", "ブランドコピー", "らしさ", "ブランド一貫性")),
+    ("kagura", ("生成AI活用", "AIガバナンス", "PoC設計", "DX推進", "RPA", "データ基盤",
+                "AI導入", "業務自動化の設計", "ノーコード自動化")),
 ]
 
 
