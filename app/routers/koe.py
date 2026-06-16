@@ -394,9 +394,66 @@ async def _recordings_on(db: AsyncSession, d: date_cls) -> list[KbRecording]:
     return list(rows.scalars())
 
 
+async def _extract_and_store_signals(
+    db: AsyncSession, signal_date: date_cls, date_label: str, recording_count: int, source_text: str
+) -> tuple[str, int, list["KbSignal"]]:
+    """ダイジェストと同じ入力から経営判断シグナルを抽出し、収束型で保存する（共通ロジック）。
+
+    その日の status=open を最新抽出で総入れ替え（done/dismissed は温存・同一 dedup_hash は復活させない）。
+    日次バッチが同じ日を毎朝再処理しても open はその日の最新セットに収束する（累積しない）。
+    返り値: (source, extracted件数, 保存した行)。
+    """
+    extracted = await koe_tag.extract_signals(source_text)
+    source = "llm" if extracted else "empty"
+
+    existing = (
+        await db.execute(
+            select(KbSignal).where(
+                KbSignal.project_key == LORE_PROJECT, KbSignal.signal_date == signal_date
+            )
+        )
+    ).scalars().all()
+    handled = {e.dedup_hash for e in existing if e.status in ("done", "dismissed")}
+    for e in existing:
+        if e.status == "open":
+            await db.delete(e)
+    await db.flush()  # 旧 open を消してから新規挿入（ユニーク制約の衝突回避）
+
+    saved_rows: list[KbSignal] = []
+    for s in extracted:
+        if s["dedup_hash"] in handled:
+            continue  # 既に社長が対応/却下済み → 復活させない
+        row = KbSignal(
+            project_key=LORE_PROJECT,
+            signal_date=signal_date,
+            signal_type=s["signal_type"],
+            title=s["title"],
+            detail=s.get("detail"),
+            who=s.get("who"),
+            importance=s["importance"],
+            status="open",
+            dedup_hash=s["dedup_hash"],
+            meta={"date": date_label, "recording_count": recording_count, "source": source},
+        )
+        # SAVEPOINT 単位で 1 行ずつ挿入。dedup ユニーク制約に当たった行だけをロールバック。
+        try:
+            async with db.begin_nested():
+                db.add(row)
+                await db.flush()
+        except IntegrityError:
+            continue
+        saved_rows.append(row)
+    await db.commit()
+    return source, len(extracted), saved_rows
+
+
 @router.post("/koe/digest", response_model=DigestResponse, dependencies=_WRITE_GUARD)
 async def koe_digest_generate(req: DigestRequest, db: AsyncSession = Depends(get_db)) -> DigestResponse:
-    """指定日(JST)の録音をまとめて経営ダイジェストを生成（save=True で kb_chunks に保存）。"""
+    """指定日(JST)の録音をまとめて経営ダイジェストを生成（save=True で kb_chunks に保存）。
+
+    保存時は同じ入力から経営判断シグナルもベストエフォートで自動抽出する（秋好モデル③）。
+    ＝既に毎朝動いている日次ダイジェスト・バッチに相乗りし、追加のPC設定なしで"自動"になる。
+    """
     date_label = req.date.isoformat()
     recordings = await _recordings_on(db, req.date)
 
@@ -438,6 +495,16 @@ async def koe_digest_generate(req: DigestRequest, db: AsyncSession = Depends(get
         )
         await db.commit()
         saved = True
+
+        # 秋好モデル③：ダイジェスト保存に相乗りして経営判断シグナルも自動抽出。
+        # ベストエフォート＝失敗してもダイジェスト生成は止めない（既に commit 済み）。
+        try:
+            await _extract_and_store_signals(db, req.date, date_label, len(recordings), source_text)
+        except Exception:  # noqa: BLE001
+            try:
+                await db.rollback()
+            except Exception:  # noqa: BLE001
+                pass
 
     return DigestResponse(
         date=date_label,
@@ -635,67 +702,33 @@ async def koe_signals_generate(req: SignalGenRequest, db: AsyncSession = Depends
         )
 
     source_text = koe_digest.build_digest_source(date_label, rec_dicts)
-    extracted = await koe_tag.extract_signals(source_text)
-    source = "llm" if extracted else "empty"
 
-    saved = 0
-    out: list[SignalItem] = []
     if req.save:
-        # 収束型の再生成（冪等）：日次バッチは同じ日を数日ぶん毎朝再処理するため、
-        # LLM の言い回し揺れで類似シグナルが溜まらないよう「その日の open は最新抽出で総入れ替え」。
-        # ただし社長が対応/却下した(done/dismissed)シグナルは手を付けず、同一 dedup_hash は復活させない。
-        existing = (
-            await db.execute(
-                select(KbSignal).where(
-                    KbSignal.project_key == LORE_PROJECT, KbSignal.signal_date == req.date
-                )
+        # 収束型の保存（その日の open を最新抽出で総入れ替え・done/dismissed は温存）。
+        source, extracted_count, saved_rows = await _extract_and_store_signals(
+            db, req.date, date_label, len(recordings), source_text
+        )
+        saved = len(saved_rows)
+        out = [
+            SignalItem(
+                id=r.id,
+                signal_date=date_label,
+                signal_type=r.signal_type,
+                title=r.title,
+                detail=r.detail,
+                who=r.who,
+                importance=r.importance,
+                status=r.status,
+                source_recording_id=r.source_recording_id,
             )
-        ).scalars().all()
-        handled = {e.dedup_hash for e in existing if e.status in ("done", "dismissed")}
-        for e in existing:
-            if e.status == "open":
-                await db.delete(e)
-        await db.flush()  # 旧 open を消してから新規挿入（ユニーク制約の衝突回避）
-
-        for s in extracted:
-            if s["dedup_hash"] in handled:
-                continue  # 既に社長が対応/却下済み → 復活させない
-            row = KbSignal(
-                project_key=LORE_PROJECT,
-                signal_date=req.date,
-                signal_type=s["signal_type"],
-                title=s["title"],
-                detail=s.get("detail"),
-                who=s.get("who"),
-                importance=s["importance"],
-                status="open",
-                dedup_hash=s["dedup_hash"],
-                meta={"date": date_label, "recording_count": len(recordings), "source": source},
-            )
-            # SAVEPOINT 単位で 1 行ずつ挿入。dedup ユニーク制約に当たった行だけを
-            # ロールバックし、既に保存済みの行は残す（セッション全体は巻き戻さない）。
-            try:
-                async with db.begin_nested():
-                    db.add(row)
-                    await db.flush()
-            except IntegrityError:
-                continue
-            saved += 1
-            out.append(
-                SignalItem(
-                    id=row.id,
-                    signal_date=date_label,
-                    signal_type=row.signal_type,
-                    title=row.title,
-                    detail=row.detail,
-                    who=row.who,
-                    importance=row.importance,
-                    status=row.status,
-                    source_recording_id=row.source_recording_id,
-                )
-            )
-        await db.commit()
+            for r in saved_rows
+        ]
     else:
+        # プレビュー（保存しない）：抽出だけ返す。
+        extracted = await koe_tag.extract_signals(source_text)
+        source = "llm" if extracted else "empty"
+        extracted_count = len(extracted)
+        saved = 0
         out = [
             SignalItem(
                 signal_date=date_label,
@@ -711,7 +744,7 @@ async def koe_signals_generate(req: SignalGenRequest, db: AsyncSession = Depends
     return SignalGenResponse(
         date=date_label,
         recording_count=len(recordings),
-        extracted=len(extracted),
+        extracted=extracted_count,
         saved=saved,
         source=source,
         signals=out,
