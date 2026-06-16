@@ -15,7 +15,7 @@
 from datetime import UTC, datetime, timedelta, timezone
 from datetime import date as date_cls
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +26,7 @@ from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
 from app.embedding import create_embedding
-from app.models import KbChunk, KbRecording, KbSpeakerAlias, KbUtterance
+from app.models import KbChunk, KbRecording, KbSignal, KbSpeakerAlias, KbUtterance
 
 _JST = timezone(timedelta(hours=9))
 
@@ -569,3 +569,197 @@ async def koe_recordings(
         for r in rows.scalars()
     ]
     return RecordingsResponse(recordings=items, total=len(items))
+
+
+# --- 経営判断シグナル（秋好モデル③：録音→"効くものだけ"自動抽出）---
+
+
+class SignalGenRequest(BaseModel):
+    date: date_cls  # JST の日付
+    save: bool = True
+
+
+class SignalItem(BaseModel):
+    id: int | None = None
+    signal_date: str
+    signal_type: str
+    title: str
+    detail: str | None = None
+    who: str | None = None
+    importance: int
+    status: str = "open"
+    source_recording_id: int | None = None
+
+
+class SignalGenResponse(BaseModel):
+    date: str
+    recording_count: int
+    extracted: int  # LLM が出した件数
+    saved: int  # 新規保存できた件数（重複は除く）
+    source: str  # llm | empty
+    signals: list[SignalItem]
+
+
+class SignalListResponse(BaseModel):
+    signals: list[SignalItem]
+    total: int
+
+
+class SignalPatchRequest(BaseModel):
+    status: str  # open | done | dismissed
+
+
+_SIGNAL_STATUSES = {"open", "done", "dismissed"}
+
+
+@router.post("/koe/signals", response_model=SignalGenResponse, dependencies=_WRITE_GUARD)
+async def koe_signals_generate(req: SignalGenRequest, db: AsyncSession = Depends(get_db)) -> SignalGenResponse:
+    """指定日(JST)の録音から経営判断シグナルを抽出（save=True で kb_signals に冪等保存）。
+
+    ダイジェストと同じ入力テキストを使い、LLM が『社長が知る/判断すべきこと』だけを構造化。
+    同一日の再実行は dedup_hash で重複を弾く（冪等）。
+    """
+    date_label = req.date.isoformat()
+    recordings = await _recordings_on(db, req.date)
+
+    rec_dicts: list[dict] = []
+    for rec in recordings:
+        lines = [{"speaker": u["speaker"], "content": u["content"]} for u in await _fetch_utterances(db, rec.id)]
+        rec_dicts.append(
+            {
+                "title": rec.title,
+                "recorded_at": str(rec.recorded_at) if rec.recorded_at else None,
+                "speakers": list(rec.speaker_set or []),
+                "lines": lines,
+            }
+        )
+
+    source_text = koe_digest.build_digest_source(date_label, rec_dicts)
+    extracted = await koe_tag.extract_signals(source_text)
+    source = "llm" if extracted else "empty"
+
+    saved = 0
+    out: list[SignalItem] = []
+    if req.save:
+        for s in extracted:
+            row = KbSignal(
+                project_key=LORE_PROJECT,
+                signal_date=req.date,
+                signal_type=s["signal_type"],
+                title=s["title"],
+                detail=s.get("detail"),
+                who=s.get("who"),
+                importance=s["importance"],
+                status="open",
+                dedup_hash=s["dedup_hash"],
+                meta={"date": date_label, "recording_count": len(recordings), "source": source},
+            )
+            # SAVEPOINT 単位で 1 行ずつ挿入。dedup ユニーク制約に当たった行だけを
+            # ロールバックし、既に保存済みの行は残す（セッション全体は巻き戻さない）。
+            try:
+                async with db.begin_nested():
+                    db.add(row)
+                    await db.flush()
+            except IntegrityError:
+                continue
+            saved += 1
+            out.append(
+                SignalItem(
+                    id=row.id,
+                    signal_date=date_label,
+                    signal_type=row.signal_type,
+                    title=row.title,
+                    detail=row.detail,
+                    who=row.who,
+                    importance=row.importance,
+                    status=row.status,
+                    source_recording_id=row.source_recording_id,
+                )
+            )
+        await db.commit()
+    else:
+        out = [
+            SignalItem(
+                signal_date=date_label,
+                signal_type=s["signal_type"],
+                title=s["title"],
+                detail=s.get("detail"),
+                who=s.get("who"),
+                importance=s["importance"],
+            )
+            for s in extracted
+        ]
+
+    return SignalGenResponse(
+        date=date_label,
+        recording_count=len(recordings),
+        extracted=len(extracted),
+        saved=saved,
+        source=source,
+        signals=out,
+    )
+
+
+@router.get("/koe/signals", response_model=SignalListResponse)
+async def koe_signals_list(
+    date: date_cls | None = Query(default=None),
+    signal_type: str | None = Query(default=None),
+    status: str | None = Query(default="open"),
+    min_importance: int = Query(default=1, ge=1, le=10),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+) -> SignalListResponse:
+    """溜まった経営判断シグナルを取り出す。既定は status=open を重要度→新しい順で。"""
+    q = select(KbSignal).where(
+        KbSignal.project_key == LORE_PROJECT,
+        KbSignal.importance >= min_importance,
+    )
+    if date is not None:
+        q = q.where(KbSignal.signal_date == date)
+    if signal_type:
+        q = q.where(KbSignal.signal_type == signal_type)
+    if status and status != "all":
+        q = q.where(KbSignal.status == status)
+    q = q.order_by(KbSignal.importance.desc(), KbSignal.signal_date.desc(), KbSignal.id.desc()).limit(limit)
+
+    rows = await db.execute(q)
+    items = [
+        SignalItem(
+            id=r.id,
+            signal_date=r.signal_date.isoformat(),
+            signal_type=r.signal_type,
+            title=r.title,
+            detail=r.detail,
+            who=r.who,
+            importance=r.importance,
+            status=r.status,
+            source_recording_id=r.source_recording_id,
+        )
+        for r in rows.scalars()
+    ]
+    return SignalListResponse(signals=items, total=len(items))
+
+
+@router.patch("/koe/signals/{signal_id}", response_model=SignalItem, dependencies=_WRITE_GUARD)
+async def koe_signal_update(
+    signal_id: int, req: SignalPatchRequest, db: AsyncSession = Depends(get_db)
+) -> SignalItem:
+    """シグナルの対応状態を更新（open→done/dismissed）。"""
+    if req.status not in _SIGNAL_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status must be one of {sorted(_SIGNAL_STATUSES)}")
+    row = await db.get(KbSignal, signal_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="signal not found")
+    row.status = req.status
+    await db.commit()
+    return SignalItem(
+        id=row.id,
+        signal_date=row.signal_date.isoformat(),
+        signal_type=row.signal_type,
+        title=row.title,
+        detail=row.detail,
+        who=row.who,
+        importance=row.importance,
+        status=row.status,
+        source_recording_id=row.source_recording_id,
+    )

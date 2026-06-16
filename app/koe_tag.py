@@ -15,6 +15,20 @@ from app.config import settings
 TAG_MODEL = "gpt-4o-mini"
 # ダイジェストは社長が読む成果物＝質重視で上位モデル
 DIGEST_MODEL = "gpt-4o"
+# シグナル抽出も経営判断に直結＝質重視で上位モデル
+SIGNAL_MODEL = "gpt-4o"
+
+_SIGNAL_SYSTEM_PROMPT = (
+    "あなたは社長専属の参謀です。会議・会話の文字起こしから、"
+    "『社長が知るべき/判断すべきこと』だけを抜き出します。雑談・確定済みの報告・"
+    "一般論・世間話は捨ててください。経営に効くものだけを残します。\n"
+    "各シグナルを次の JSON オブジェクトで表し、JSON配列だけを出力してください（説明文・コードフェンス禁止）:\n"
+    '{"type":"種別","title":"一言の見出し","detail":"1〜2文の背景","who":"誰が/誰について(不明はnull)","importance":1〜10}\n'
+    "type は次のいずれか: "
+    "decision(社長が決めるべき/判断待ち), risk(リスク・火種), opportunity(好機・商談・改善), "
+    "promise(誰かが約束した宿題・TODO), complaint(人の不満・離職の芽), number(重要な数字・KPIの変化), other(その他)。\n"
+    "importance は経営インパクトの大きさ。該当が無ければ空配列 [] を返す。最大15件。"
+)
 
 _SYSTEM_PROMPT = (
     "あなたは会議・会話の文字起こしに話題タグを付ける専門家です。"
@@ -70,3 +84,28 @@ async def generate_daily_digest(source_text: str) -> str | None:
         return text or None
     except Exception:
         return None
+
+
+async def extract_signals(source_text: str) -> list[dict]:
+    """1日分の録音テキストから経営判断シグナルを抽出（正規化済み行のリスト）。
+
+    ベストエフォート：APIキー未設定・LLM障害・パース失敗のいずれでも例外を投げず []。
+    返り値の各要素は koe_signal.parse_signals が正規化した dict。
+    """
+    from app import koe_signal
+
+    if not settings.openai_api_key or not source_text.strip():
+        return []
+    try:
+        resp = await _get_client().chat.completions.create(
+            model=SIGNAL_MODEL,
+            messages=[
+                {"role": "system", "content": _SIGNAL_SYSTEM_PROMPT},
+                {"role": "user", "content": source_text},
+            ],
+            temperature=0,
+            max_tokens=1800,
+        )
+        return koe_signal.parse_signals(resp.choices[0].message.content, max_signals=15)
+    except Exception:
+        return []

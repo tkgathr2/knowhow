@@ -31,9 +31,11 @@ _PROTECTED_API_PREFIXES = (
     "/api/search",
     "/api/devin/recall",
     # ロア（録音資産）の read：録音内容は機微なのでブラウザは Google ログイン必須
-    # （GET /koe/digest・/koe/recordings）。POST 系は koe 側の X-API-Key ガードが別途効く。
+    # （GET /koe/digest・/koe/recordings・/koe/signals）。POST/PATCH 系は koe 側の
+    # X-API-Key ガードが別途効く。signals は判断/リスク/人の不満/数字＝録音以上に機微。
     "/api/koe/digest",
     "/api/koe/recordings",
+    "/api/koe/signals",
 )
 _ALWAYS_OPEN_PREFIXES = ("/health", "/auth", "/static")
 

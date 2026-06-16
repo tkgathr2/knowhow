@@ -316,3 +316,43 @@ class KbSpeakerAlias(Base):
 
     alias = Column(Text, primary_key=True)
     canonical = Column(Text, nullable=False)
+
+
+class KbSignal(Base):
+    """ロア（録音資産）から抽出した「経営判断に役立つシグナル」。
+
+    秋好モデル（録音→まとめ→"効くものだけ"抽出）の③。日次ダイジェスト生成と同じ
+    入力から LLM が「社長が知る/判断すべきこと」だけを構造化して取り出し、ここに溜める。
+    雑談・確定済みは捨てる。dedup_hash で同一日の再実行による重複を冪等に防ぐ。
+    """
+
+    __tablename__ = "kb_signals"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    project_key = Column(
+        String, ForeignKey("kb_projects.project_key", ondelete="CASCADE"), nullable=False, default="lore"
+    )
+    # シグナルが指す対象日（JST）。録音日に紐づく。
+    signal_date = Column(Date, nullable=False)
+    # 種別: decision/risk/opportunity/promise/complaint/number/other
+    signal_type = Column(String, nullable=False, default="other")
+    title = Column(Text, nullable=False)
+    detail = Column(Text)
+    # 誰が/誰について（任意）
+    who = Column(Text)
+    importance = Column(Integer, nullable=False, default=5)
+    # 対応状態: open（未対応）/done（対応済み）/dismissed（捨てた）
+    status = Column(String, nullable=False, default="open")
+    source_recording_id = Column(BigInteger)
+    # 同一日内の重複防止キー（type+title の正規化ハッシュ）
+    dedup_hash = Column(Text, nullable=False)
+    meta = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_kb_signals_dedup", "project_key", "signal_date", "dedup_hash", unique=True),
+        Index("ix_kb_signals_date", "signal_date"),
+        Index("ix_kb_signals_type", "signal_type"),
+        Index("ix_kb_signals_status", "status"),
+        Index("ix_kb_signals_importance", "importance"),
+    )
