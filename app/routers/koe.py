@@ -641,7 +641,25 @@ async def koe_signals_generate(req: SignalGenRequest, db: AsyncSession = Depends
     saved = 0
     out: list[SignalItem] = []
     if req.save:
+        # 収束型の再生成（冪等）：日次バッチは同じ日を数日ぶん毎朝再処理するため、
+        # LLM の言い回し揺れで類似シグナルが溜まらないよう「その日の open は最新抽出で総入れ替え」。
+        # ただし社長が対応/却下した(done/dismissed)シグナルは手を付けず、同一 dedup_hash は復活させない。
+        existing = (
+            await db.execute(
+                select(KbSignal).where(
+                    KbSignal.project_key == LORE_PROJECT, KbSignal.signal_date == req.date
+                )
+            )
+        ).scalars().all()
+        handled = {e.dedup_hash for e in existing if e.status in ("done", "dismissed")}
+        for e in existing:
+            if e.status == "open":
+                await db.delete(e)
+        await db.flush()  # 旧 open を消してから新規挿入（ユニーク制約の衝突回避）
+
         for s in extracted:
+            if s["dedup_hash"] in handled:
+                continue  # 既に社長が対応/却下済み → 復活させない
             row = KbSignal(
                 project_key=LORE_PROJECT,
                 signal_date=req.date,
