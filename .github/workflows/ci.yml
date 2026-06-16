@@ -20,6 +20,10 @@ jobs:
         run: pipx install poetry
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
+      - name: Install test-only DB driver (aiosqlite)
+        # 本番は asyncpg/Postgres。aiosqlite は test_koe_signal_savepoint の
+        # in-memory sqlite テスト専用。lock churn を避けるため CI でのみ pip 導入。
+        run: poetry run pip install aiosqlite
       - name: Ruff (lint)
         run: poetry run ruff check app tests
       - name: Pytest
