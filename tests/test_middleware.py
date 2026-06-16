@@ -83,3 +83,20 @@ def test_protected_when_oauth_enabled(reset_settings):
     assert c.get("/api/stats").status_code == 200
     me = c.get("/auth/me").json()
     assert me["user"] == "ceo@takagi.bz" and me["oauth_enabled"] is True
+
+
+def test_koe_signals_read_is_protected(reset_settings):
+    """GET /api/koe/signals は録音由来の機微情報（判断/リスク/人の不満/数字）。
+
+    OAuth 有効時は digest/recordings と同様にログイン必須＝鍵なしブラウザは 401。
+    （HIGH レビュー指摘の回帰防止：保護プレフィックス漏れを検知する）
+    """
+    settings.google_client_id = "cid"
+    settings.google_client_secret = "csec"
+    settings.session_secret = "signing-secret-xyz"
+    settings.kb_api_key = "agent-key-123"
+    c = TestClient(build_app())
+
+    assert c.get("/api/koe/signals").status_code == 401
+    assert c.get("/api/koe/digest").status_code == 401  # 既存の流儀と揃っていること
+    assert c.get("/api/koe/signals", headers={"X-API-Key": "agent-key-123"}).status_code != 401
