@@ -160,6 +160,24 @@ async def root():
     return FileResponse(_STATIC_DIR / "index.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    # ブラウザが自動取得するファビコン。未定義だと {"detail":"Not Found"} が
+    # 出てシステムが壊れているように見えるため、必ずアイコンを返す。
+    return FileResponse(_STATIC_DIR / "favicon.ico", media_type="image/x-icon")
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon_svg():
+    return FileResponse(_STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+async def apple_touch_icon():
+    return FileResponse(_STATIC_DIR / "apple-touch-icon.png", media_type="image/png")
+
+
 @app.get("/growth", include_in_schema=False)
 async def growth_page():
     return FileResponse(_STATIC_DIR / "growth.html")
