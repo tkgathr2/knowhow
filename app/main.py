@@ -27,6 +27,7 @@ from app.routers import (
     koe,
     metabolize,
     nightly,
+    nippou,
     search,
     token_cutter,
     webhook,
@@ -130,6 +131,8 @@ app.include_router(anthropic_cost.router, prefix="/api")
 app.include_router(auto_learn.router, prefix="/api")
 # 1日のダイジェスト: /digest/daily=閲覧開放（middlewareでブラウザ保護） / /digest/run=EP単位で保護
 app.include_router(digest.router, prefix="/api")
+# 各部署の日報: GET=開放（ダッシュボード/ビューアが鍵なしで叩く） / POST=EP単位でKB_API_KEY保護
+app.include_router(nippou.router, prefix="/api")
 
 # --- 書き込み・バッチ・外部取込系：保護 ---
 app.include_router(ingest.router, prefix="/api", dependencies=_protected)
@@ -175,6 +178,11 @@ async def daily_page():
 @app.get("/bucho", include_in_schema=False)
 async def bucho_page():
     return FileResponse(_STATIC_DIR / "bucho.html")
+
+
+@app.get("/nippou", include_in_schema=False)
+async def nippou_page():
+    return FileResponse(_STATIC_DIR / "nippou.html")
 
 
 @app.get("/bucho/{key}", include_in_schema=False)

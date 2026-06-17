@@ -6,6 +6,7 @@
     ["/growth", "成長"],
     ["/daily", "毎日ログ"],
     ["/bucho", "部長別"],
+    ["/nippou", "日報"],
     ["/token-cutter", "コスト"],
     ["/anthropic-cost", "AIコスト"],
     ["/lore", "ロア"],
