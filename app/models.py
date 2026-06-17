@@ -1,5 +1,6 @@
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Column,
@@ -355,4 +356,42 @@ class KbSignal(Base):
         Index("ix_kb_signals_type", "signal_type"),
         Index("ix_kb_signals_status", "status"),
         Index("ix_kb_signals_importance", "importance"),
+    )
+
+
+class DailyReport(Base):
+    """各担当部署の日次レポート（日報）。
+
+    日報の表示の本拠を Notion→knowhow（Web）に移すための表。まずステップアップ
+    （department='stepup'）から。将来 総務（'soumu'）・交通誘導（'koutsu'）も
+    同じ枠で増やせる設計。1部署×1日で1件（UNIQUE(department, report_date)）。
+    再投入は upsert で重複させず UPDATE する。
+    """
+
+    __tablename__ = "daily_reports"
+
+    # 本番は BIGSERIAL。sqlite は INTEGER PK でないと autoincrement しないので variant で落とす。
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    # 部署: stepup / soumu / koutsu
+    department = Column(String, nullable=False)
+    # 日報が指す対象日
+    report_date = Column(Date, nullable=False)
+    # 担当部長の表示名（例 "SU参謀 本部長 橘 遼一"）
+    bucho = Column(Text)
+    # 部長の一言フレーミング（1〜2行）
+    bucho_comment = Column(Text)
+    title = Column(Text)
+    # 5行サマリー
+    summary = Column(Text)
+    # 日報本文（Markdown）
+    body_md = Column(Text)
+    # 任意のKPI（売上/目標/達成率/ファネル等）。本番は JSONB、テスト(sqlite)では汎用 JSON に落とす。
+    metrics = Column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_daily_reports_dept_date", "department", "report_date", unique=True),
+        Index("ix_daily_reports_date", "report_date"),
+        Index("ix_daily_reports_department", "department"),
     )
