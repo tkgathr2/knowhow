@@ -145,38 +145,39 @@ def aggregate(rows: list[dict], since_iso: str, prev_since_iso: str) -> list[dic
     return out
 
 
-def aggregate_compare(rows: list[dict], windows: list[dict]) -> dict[str, dict]:
-    """各部長について、複数の比較窓ごとに『増えた件数』と『前の同期間比の%』を返す。
+def growth_ratio(added: int, total: int) -> float | None:
+    """『その期間で増えた数』が、期間前の総数に対して何%の伸びかを返す（成長率）。
 
-    社長の比較ビュー用（昨日より・一週間前より・1か月前と比べて、それぞれ%付き）。
-    windows: [{"key": "d1", "since": ISO, "prev_since": ISO}, ...]
-      - since:      この窓の開始（cur = created >= since）
-      - prev_since: 1つ前の同じ長さの窓の開始（prev = prev_since <= created < since）
-    戻り値: 部長キー → {<key>: 件数, "<key>_pct": %|None, ...}
-      %は (cur - prev) / prev * 100。prev が 0 のときは None（新規）。
+    人間の直感に合う比率：「1か月前と比べて総数が何%増えたか」。
+    added: 期間内に増えた件数 / total: その部長の全期間の総数。
+    base = total - added = 「その期間が始まる前の総数」。
+    base <= 0（その時点ではまだ知恵ゼロ）のときは None（新規＝比較対象なし）。
+    増えた数は負にならないので比率は常に 0% 以上。
+    """
+    base = total - added
+    if base <= 0:
+        return None
+    return round(added / base * 100, 1)
+
+
+def aggregate_compare(rows: list[dict], windows: list[dict]) -> dict[str, dict]:
+    """各部長について、複数の比較窓ごとに『増えた件数』を返す。
+
+    社長の比較ビュー用（昨日より・一週間前より・1か月前と比べて）。
+    windows: [{"key": "d1", "since": ISO}, ...]（since = この窓の開始。created >= since で計上）
+    戻り値: 部長キー → {<key>: 件数, ...}
+    比率(%)は総数が要るので route 側で growth_ratio() を使って付ける。
     rows は aggregate と同じ生データ（created_at は ISO 文字列で比較可）。
     """
     wkeys = [w["key"] for w in windows]
     cur = {k: {wk: 0 for wk in wkeys} for k in BUCHO_KEYS}
-    prev = {k: {wk: 0 for wk in wkeys} for k in BUCHO_KEYS}
     for r in rows:
         key = classify(r.get("project_key", ""), r.get("tags"), r.get("content_head", ""))
         created = str(r.get("created_at") or "")
         for w in windows:
             if created >= w["since"]:
                 cur[key][w["key"]] += 1
-            elif created >= w["prev_since"]:
-                prev[key][w["key"]] += 1
-
-    out: dict[str, dict] = {}
-    for k in BUCHO_KEYS:
-        d: dict = {}
-        for wk in wkeys:
-            c, p = cur[k][wk], prev[k][wk]
-            d[wk] = c
-            d[f"{wk}_pct"] = round((c - p) / p * 100, 1) if p > 0 else None
-        out[k] = d
-    return out
+    return cur
 
 
 def bucho_def(key: str) -> dict | None:
