@@ -39,13 +39,20 @@
       a.textContent = label;
       var active = href === "/" ? path === "/" : path === href;
       a.className =
-        "text-sm px-3 py-1.5 rounded-lg transition " +
+        "text-sm px-3 py-1.5 rounded-lg transition whitespace-nowrap shrink-0 " +
         (active
           ? "bg-indigo-600 text-white"
           : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700");
       frag.appendChild(a);
     });
     cont.insertBefore(frag, auth || null);
+
+    // 横一列で気持ちよく並べる：コンテナは折り返し可（はみ出たら丸ごと次行へ）、
+    // 各ボタンは縮めず・文字を途中で折り返さない（"立て"に潰れるのを防ぐ）。
+    cont.classList.add("flex", "flex-wrap", "items-center", "justify-end", "gap-2", "gap-y-2");
+    Array.prototype.forEach.call(cont.children, function (el) {
+      el.classList.add("shrink-0", "whitespace-nowrap");
+    });
   }
 
   if (document.readyState !== "loading") build();
