@@ -209,7 +209,11 @@ async def daily_page():
 
 @app.get("/bucho", include_in_schema=False)
 async def bucho_page():
-    return FileResponse(_STATIC_DIR / "bucho.html")
+    # no-cache: ブラウザに毎回 ETag 再検証させ、更新が普通のリロードで必ず反映されるように
+    # する（ハードリロード不要。社長が「変わってない」となるキャッシュ事故を防ぐ）。
+    return FileResponse(
+        _STATIC_DIR / "bucho.html", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/nippou", include_in_schema=False)
