@@ -587,8 +587,11 @@ def _day_expr(col):
 async def get_growth_daily(
     days: int = 14,
     project_key: str | None = None,
+    light: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> DailyResponse:
+    # light=True: 重い「中身（最大600件・本文取得）」を省き、数字とチップだけ即返す。
+    # 画面の初回描画を待たせない用途（中身は後追いで full 呼び出しが埋める）。
     days = max(1, min(days, 60))
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
@@ -644,44 +647,47 @@ async def get_growth_daily(
     )
     recalled_by_day = {r.d: r.c for r in recalled_rows if r.d}
 
-    # その日に増えた「正味のナレッジ資産」の中身（新しい順）
-    item_rows = await db.execute(
-        select(
-            KbChunk.id,
-            KbChunk.project_key,
-            KbChunk.chunk_type,
-            KbChunk.source_type,
-            KbChunk.content,
-            KbChunk.tags,
-            KbChunk.confidence_score,
-            KbChunk.recall_count,
-            KbChunk.is_deprecated,
-            KbChunk.created_at,
-            created_day.label("d"),
-        )
-        .where(*where, KbChunk.source_type != _LOG_SOURCE)
-        .order_by(KbChunk.created_at.desc())
-        .limit(600)
-    )
+    # その日に増えた「正味のナレッジ資産」の中身（新しい順）。
+    # ここが最重）— 最大600行の本文(content)取得で、並行トラフィック時に
+    # キャッシュが落ちると数百ms〜1秒超かかる。light では丸ごと省いて即返す。
     items_by_day: dict[str, list[DailyItem]] = {}
-    for row in item_rows:
-        preview = (row.content or "")[:160]
-        if len(row.content or "") > 160:
-            preview += "…"
-        items_by_day.setdefault(row.d, []).append(
-            DailyItem(
-                chunk_id=row.id,
-                project_key=row.project_key,
-                chunk_type=row.chunk_type,
-                source_type=row.source_type,
-                preview=preview,
-                tags=row.tags or [],
-                confidence=round(float(row.confidence_score) * 100, 1),
-                recall_count=row.recall_count,
-                is_deprecated=row.is_deprecated,
-                created_at=row.created_at,
+    if not light:
+        item_rows = await db.execute(
+            select(
+                KbChunk.id,
+                KbChunk.project_key,
+                KbChunk.chunk_type,
+                KbChunk.source_type,
+                KbChunk.content,
+                KbChunk.tags,
+                KbChunk.confidence_score,
+                KbChunk.recall_count,
+                KbChunk.is_deprecated,
+                KbChunk.created_at,
+                created_day.label("d"),
             )
+            .where(*where, KbChunk.source_type != _LOG_SOURCE)
+            .order_by(KbChunk.created_at.desc())
+            .limit(600)
         )
+        for row in item_rows:
+            preview = (row.content or "")[:160]
+            if len(row.content or "") > 160:
+                preview += "…"
+            items_by_day.setdefault(row.d, []).append(
+                DailyItem(
+                    chunk_id=row.id,
+                    project_key=row.project_key,
+                    chunk_type=row.chunk_type,
+                    source_type=row.source_type,
+                    preview=preview,
+                    tags=row.tags or [],
+                    confidence=round(float(row.confidence_score) * 100, 1),
+                    recall_count=row.recall_count,
+                    is_deprecated=row.is_deprecated,
+                    created_at=row.created_at,
+                )
+            )
 
     days_desc = growth_calc.daily_keys(
         asset_by_day, log_by_day, dep_by_day, recalled_by_day, items_by_day
