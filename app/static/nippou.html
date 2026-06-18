@@ -57,8 +57,8 @@
   <!-- 部署タブ -->
   <div class="flex flex-wrap items-center gap-2">
     <span id="t-stepup" class="tab active" onclick="setDept('stepup')">ステップアップ</span>
-    <span id="t-soumu" class="tab" onclick="setDept('soumu')">総務<span class="text-[10px] opacity-70 ml-1">準備中</span></span>
-    <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導<span class="text-[10px] opacity-70 ml-1">準備中</span></span>
+    <span id="t-soumu" class="tab" onclick="setDept('soumu')">総務</span>
+    <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導</span>
   </div>
 
   <div class="flex flex-col lg:flex-row gap-5">
@@ -174,13 +174,6 @@ function selectReport(id){selectedId=id;renderDateList();renderDetail();}
 
 async function load(){
   loadAuth();
-  const box=document.getElementById('detail');
-  if(dept!=='stepup'){
-    reports=[];
-    document.getElementById('date-list').innerHTML='<p class="p-4 text-xs text-gray-400">準備中です</p>';
-    box.innerHTML='<div class="text-center py-16 text-gray-400"><div class="text-4xl mb-2">🚧</div><p class="text-sm">この部署の日報は準備中です。</p></div>';
-    return;
-  }
   const d=await api(`/api/nippou?department=${dept}&limit=60`);
   reports=(d&&d.items)||[];
   if(!selectedId&&reports.length) selectedId=reports[0].id;
