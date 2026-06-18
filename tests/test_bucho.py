@@ -80,6 +80,43 @@ class TestAggregate:
         assert kujo["growth_pct"] is None
 
 
+class TestAggregateCompare:
+    def _rows(self):
+        # now を 2026-06-19T12:00 と仮定した比較窓のテスト
+        return [
+            # 昨日(1日内) のもの → d1,d7,d30 すべて加算
+            {"project_key": "knowhow", "tags": [], "content_head": "",
+             "created_at": "2026-06-19T06:00:00+00:00", "recall_count": 0},
+            # 直近1週間（だが昨日より前）→ d7,d30 のみ
+            {"project_key": "knowhow", "tags": [], "content_head": "",
+             "created_at": "2026-06-15T00:00:00+00:00", "recall_count": 0},
+            # 直近1か月（だが1週間より前）→ d30 のみ
+            {"project_key": "knowhow", "tags": [], "content_head": "",
+             "created_at": "2026-06-01T00:00:00+00:00", "recall_count": 0},
+            # 1か月より前 → どれにも入らない
+            {"project_key": "knowhow", "tags": [], "content_head": "",
+             "created_at": "2026-04-01T00:00:00+00:00", "recall_count": 0},
+            # 別部長（kujo）昨日分
+            {"project_key": "monthly-cf", "tags": [], "content_head": "",
+             "created_at": "2026-06-19T09:00:00+00:00", "recall_count": 0},
+        ]
+
+    def test_windows(self):
+        out = bucho.aggregate_compare(
+            self._rows(),
+            "2026-06-18T12:00:00+00:00",  # 昨日(1日)
+            "2026-06-12T12:00:00+00:00",  # 1週間
+            "2026-05-20T12:00:00+00:00",  # 1か月
+        )
+        assert out["sanada"] == {"d1": 1, "d7": 2, "d30": 3}
+        assert out["kujo"] == {"d1": 1, "d7": 1, "d30": 1}
+        assert out["common"] == {"d1": 0, "d7": 0, "d30": 0}
+
+    def test_all_keys_present(self):
+        out = bucho.aggregate_compare([], "2026-06-18", "2026-06-12", "2026-05-20")
+        assert set(out.keys()) == set(bucho.BUCHO_KEYS)
+
+
 class TestMonthLabels:
     def test_six_months(self):
         assert bucho.month_labels("2026-06") == [
