@@ -172,6 +172,14 @@ function renderDetail(){
 
 function selectReport(id){selectedId=id;renderDateList();renderDetail();}
 
+function initDeptFromUrl(){
+  const q=new URLSearchParams(window.location.search).get('dept');
+  if(q && ['stepup','soumu','koutsu'].includes(q)){
+    dept=q;
+    ['stepup','soumu','koutsu'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
+  }
+}
+
 async function load(){
   loadAuth();
   const d=await api(`/api/nippou?department=${dept}&limit=60`);
@@ -181,6 +189,7 @@ async function load(){
   renderDetail();
 }
 
+initDeptFromUrl();
 load();
 </script>
 <script src="/static/nav.js"></script>

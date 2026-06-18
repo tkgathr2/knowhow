@@ -491,7 +491,7 @@ async function loadNippouLatest() {
       </div>`;
     }
     const sumHead = (r.summary || '').split('\n')[0] || '';
-    return `<a href="/nippou" class="block border border-gray-200 rounded-xl p-4 hover:shadow hover:border-indigo-300 transition">
+    return `<a href="/nippou?dept=${encodeURIComponent(dep.key)}" class="block border border-gray-200 rounded-xl p-4 hover:shadow hover:border-indigo-300 transition">
       <div class="flex items-center justify-between gap-2">
         <div class="text-sm font-semibold text-gray-800">${esc(dep.label)}</div>
         <div class="text-xs text-gray-400">${esc(r.report_date)}</div>
