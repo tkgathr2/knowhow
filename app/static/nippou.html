@@ -123,14 +123,30 @@ function renderDateList(){
   }).join('');
 }
 
+const METRIC_LABELS={
+  sales_month:'月間売上', target_month:'月間目標', achv_pct:'達成率',
+  naitei_today:'本日の内定', naitei_month:'今月の内定', week_total:'先週の合計売上',
+  week_pct:'先週時点の進捗', funnel:'採用ファネル', sales_today:'本日の売上'
+};
+const FUNNEL_ORDER=['登録','面談','紹介','面接','内定'];
+function fmtYen(n){ return '¥'+Number(n).toLocaleString('ja-JP'); }
+function fmtFunnel(f){
+  const keys=FUNNEL_ORDER.filter(k=>k in f).concat(Object.keys(f).filter(k=>!FUNNEL_ORDER.includes(k)));
+  return keys.map(k=>`${k} ${f[k]}`).join('　→　');
+}
 function kpiCards(metrics){
   if(!metrics||typeof metrics!=='object'||!Object.keys(metrics).length) return '';
   const cards=Object.entries(metrics).map(([k,v])=>{
+    const label=METRIC_LABELS[k]||k;
+    const wide=(k==='funnel');
     let val=v;
-    if(v&&typeof v==='object') val=JSON.stringify(v);
-    return `<div class="bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
-      <div class="text-[11px] text-indigo-500">${esc(k)}</div>
-      <div class="text-base font-bold text-indigo-900 break-all">${esc(val)}</div>
+    if(k==='funnel'&&v&&typeof v==='object') val=fmtFunnel(v);
+    else if(v&&typeof v==='object') val=Object.entries(v).map(([kk,vv])=>`${kk} ${vv}`).join('　/　');
+    else if(typeof v==='number'&&/(sales|total|target|amount|kingaku)/.test(k)) val=fmtYen(v);
+    else if(typeof v==='number'&&/(pct|rate|ritsu)/.test(k)) val=v+'%';
+    return `<div class="bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 ${wide?'col-span-2 sm:col-span-4':''}">
+      <div class="text-[11px] text-indigo-500">${esc(label)}</div>
+      <div class="text-base font-bold text-indigo-900 break-all">${esc(String(val))}</div>
     </div>`;
   }).join('');
   return `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">${cards}</div>`;
