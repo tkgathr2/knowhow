@@ -156,11 +156,18 @@ function dayBlock(e){
   const items=(e.items||[]).map(itemCard).join('');
   const more=e.items_truncated>0?`<div class="px-3 py-2 text-xs text-gray-400">…ほか ${e.items_truncated} 件</div>`:'';
   const itemCount=(e.items||[]).length+(e.items_truncated||0);
-  const body=items?`<details class="m-1.5">
+  let body;
+  if(items){
+    body=`<details class="m-1.5">
       <summary class="cursor-pointer select-none text-xs text-indigo-600 hover:text-indigo-800 px-3 py-2">▼ 1件ずつ見る（${itemCount}件）</summary>
       <div class="divide-y divide-gray-50 mt-1">${items}${more}</div>
-    </details>`
-    :'<div class="px-3 py-2 text-xs text-gray-400">この日の新しい知恵はありません（活動のみ）</div>';
+    </details>`;
+  } else if(!itemsLoaded && e.asset_added>0){
+    // 中身（最大600件の本文）は後追いで読み込み中。数字は先に出ている。
+    body='<div class="px-3 py-2 text-xs text-gray-400">中身を読み込み中…</div>';
+  } else {
+    body='<div class="px-3 py-2 text-xs text-gray-400">この日の新しい知恵はありません（活動のみ）</div>';
+  }
   return `<div class="fade-in">
     <div class="flex items-center gap-3 mb-2">
       <h2 class="text-sm font-semibold text-gray-700">${dateLabel(e.date)}</h2>
@@ -199,6 +206,8 @@ async function loadAuth(){
 }
 
 let lastEntries=[];
+let itemsLoaded=false;   // 中身（最大600件の本文）まで読めたか
+let loadToken=0;         // 期間切替で古い後追いレスポンスを捨てるための番号
 function renderTimeline(){
   const tl=document.getElementById('timeline');
   tl.innerHTML=lastEntries.map(dayBlock).join('');
@@ -208,9 +217,12 @@ async function load(){
   loadAuth();
   const tl=document.getElementById('timeline');
   const empty=document.getElementById('empty');
+  const my=++loadToken;
+  itemsLoaded=false;
   tl.innerHTML='<p class="text-sm text-gray-400">読み込み中…</p>';
-  // ① まず数字・タグだけ即表示（まとめの生成は待たない）
-  const d=await api('/api/growth/daily?days='+days);
+  // ① まず数字・チップだけ即表示（light=1＝重い本文取得を省くので速い）
+  const d=await api('/api/growth/daily?days='+days+'&light=1');
+  if(my!==loadToken)return;  // 期間が切り替わっていたら破棄
   if(!d){tl.innerHTML='<p class="text-sm text-gray-400">読み込みに失敗しました</p>';return;}
   document.getElementById('since').textContent=d.since+' 〜';
   renderHeadline(d.latest);
@@ -218,8 +230,18 @@ async function load(){
   empty.classList.add('hidden');
   lastEntries=d.entries;
   renderTimeline();
-  // ② まとめ（黄色い枠）は後から差し込む
+  // ② 中身（テーマタグ＋「1件ずつ見る」）を後追いで差し込む
+  api('/api/growth/daily?days='+days).then(full=>{
+    if(my!==loadToken)return;
+    if(full&&full.entries&&full.entries.length){
+      lastEntries=full.entries;
+      itemsLoaded=true;
+      renderTimeline();
+    }
+  });
+  // ③ まとめ（黄色い枠）も後から差し込む
   api('/api/digest/daily?days='+days).then(dg=>{
+    if(my!==loadToken)return;
     if(dg&&dg.entries){
       digests={};
       dg.entries.forEach(x=>{digests[x.date]=x;});
