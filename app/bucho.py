@@ -145,32 +145,38 @@ def aggregate(rows: list[dict], since_iso: str, prev_since_iso: str) -> list[dic
     return out
 
 
-def aggregate_compare(
-    rows: list[dict], day_since: str, week_since: str, month_since: str
-) -> dict[str, dict]:
-    """各部長について『昨日1日 / 直近1週間 / 直近1か月』で増えた件数を返す。
+def aggregate_compare(rows: list[dict], windows: list[dict]) -> dict[str, dict]:
+    """各部長について、複数の比較窓ごとに『増えた件数』と『前の同期間比の%』を返す。
 
-    社長の比較ビュー用（昨日より・一週間前より・1か月前と比べて）。
-    - d1: 昨日1日（直近24時間）で増えた数
-    - d7: 直近1週間で増えた数
-    - d30: 直近1か月（30日）で増えた数
+    社長の比較ビュー用（昨日より・一週間前より・1か月前と比べて、それぞれ%付き）。
+    windows: [{"key": "d1", "since": ISO, "prev_since": ISO}, ...]
+      - since:      この窓の開始（cur = created >= since）
+      - prev_since: 1つ前の同じ長さの窓の開始（prev = prev_since <= created < since）
+    戻り値: 部長キー → {<key>: 件数, "<key>_pct": %|None, ...}
+      %は (cur - prev) / prev * 100。prev が 0 のときは None（新規）。
     rows は aggregate と同じ生データ（created_at は ISO 文字列で比較可）。
-    各 *_since は now からさかのぼった開始日時（ISO・新しいほど大きい文字列）。
-    戻り値は部長キー → {"d1","d7","d30"} の辞書。
     """
-    stats = {k: {"d1": 0, "d7": 0, "d30": 0} for k in BUCHO_KEYS}
+    wkeys = [w["key"] for w in windows]
+    cur = {k: {wk: 0 for wk in wkeys} for k in BUCHO_KEYS}
+    prev = {k: {wk: 0 for wk in wkeys} for k in BUCHO_KEYS}
     for r in rows:
         key = classify(r.get("project_key", ""), r.get("tags"), r.get("content_head", ""))
         created = str(r.get("created_at") or "")
-        if created < month_since:
-            continue
-        s = stats[key]
-        s["d30"] += 1
-        if created >= week_since:
-            s["d7"] += 1
-            if created >= day_since:
-                s["d1"] += 1
-    return stats
+        for w in windows:
+            if created >= w["since"]:
+                cur[key][w["key"]] += 1
+            elif created >= w["prev_since"]:
+                prev[key][w["key"]] += 1
+
+    out: dict[str, dict] = {}
+    for k in BUCHO_KEYS:
+        d: dict = {}
+        for wk in wkeys:
+            c, p = cur[k][wk], prev[k][wk]
+            d[wk] = c
+            d[f"{wk}_pct"] = round((c - p) / p * 100, 1) if p > 0 else None
+        out[k] = d
+    return out
 
 
 def bucho_def(key: str) -> dict | None:

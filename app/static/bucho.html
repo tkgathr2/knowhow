@@ -66,19 +66,21 @@ function setDays(n){
   load();
 }
 
-function cmpBox(label,n,color){
-  return `<div class="bg-gray-50 rounded-lg py-1.5 text-center" title="${label}で増えた知恵の数">
+function pctTag(pct,pctLabel){
+  if(pct==null) return `<div class="text-[10px] text-gray-300">${pctLabel} —</div>`;
+  const up=pct>=0;
+  return `<div class="text-[10px] font-semibold ${up?'text-emerald-600':'text-red-500'}" title="${pctLabel}（前の同じ期間と比べた伸び）">${pctLabel} ${up?'↑+':'↓'}${up?pct:Math.abs(pct)}%</div>`;
+}
+function cmpBox(label,n,pct,pctLabel,color){
+  return `<div class="bg-gray-50 rounded-lg py-1.5 px-1 text-center" title="${label}で増えた知恵の数">
     <div class="text-[11px] text-gray-400">${label}</div>
     <div class="text-base font-bold" style="color:${color}">+${fmt(n)}</div>
+    ${pctTag(pct,pctLabel)}
   </div>`;
 }
 
 function card(b,maxAdded){
   const bar=Math.round(b.added/Math.max(1,maxAdded)*100);
-  const g=b.growth_pct;
-  const trend=g==null?'<span class="text-xs text-gray-400">前の期間のデータなし（新規）</span>'
-    :(g>=0?`<span class="text-emerald-600 text-xs font-semibold">↑ 前の${days}日より +${g}%</span>`
-          :`<span class="text-red-500 text-xs font-semibold">↓ 前の${days}日より ${g}%</span>`);
   return `<a href="/bucho/${esc(b.key)}" class="block bg-white border border-gray-200 rounded-2xl p-5 hover:shadow-md hover:border-indigo-300 transition fade-in">
     <div class="flex items-center gap-3 mb-2">
       <span class="text-4xl">${b.emoji}</span>
@@ -98,11 +100,10 @@ function card(b,maxAdded){
       <span title="この部長の知恵がAIに使われた回数">活躍 <b class="text-gray-700">${fmt(b.recalls)}</b>回</span>
     </div>
     <div class="grid grid-cols-3 gap-2 mt-3">
-      ${cmpBox('昨日', b.d1, b.color)}
-      ${cmpBox('1週間', b.d7, b.color)}
-      ${cmpBox('1か月', b.d30, b.color)}
+      ${cmpBox('昨日', b.d1, b.d1_pct, '前日比', b.color)}
+      ${cmpBox('1週間', b.d7, b.d7_pct, '前週比', b.color)}
+      ${cmpBox('1か月', b.d30, b.d30_pct, '前月比', b.color)}
     </div>
-    <div class="mt-1.5">${trend}</div>
   </a>`;
 }
 

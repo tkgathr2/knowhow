@@ -101,20 +101,44 @@ class TestAggregateCompare:
              "created_at": "2026-06-19T09:00:00+00:00", "recall_count": 0},
         ]
 
-    def test_windows(self):
-        out = bucho.aggregate_compare(
-            self._rows(),
-            "2026-06-18T12:00:00+00:00",  # 昨日(1日)
-            "2026-06-12T12:00:00+00:00",  # 1週間
-            "2026-05-20T12:00:00+00:00",  # 1か月
-        )
-        assert out["sanada"] == {"d1": 1, "d7": 2, "d30": 3}
-        assert out["kujo"] == {"d1": 1, "d7": 1, "d30": 1}
-        assert out["common"] == {"d1": 0, "d7": 0, "d30": 0}
+    _WINDOWS = [
+        {"key": "d1", "since": "2026-06-18T12:00:00+00:00", "prev_since": "2026-06-17T12:00:00+00:00"},
+        {"key": "d7", "since": "2026-06-12T12:00:00+00:00", "prev_since": "2026-06-05T12:00:00+00:00"},
+        {"key": "d30", "since": "2026-05-20T12:00:00+00:00", "prev_since": "2026-04-20T12:00:00+00:00"},
+    ]
+
+    def test_windows_counts(self):
+        out = bucho.aggregate_compare(self._rows(), self._WINDOWS)
+        assert out["sanada"]["d1"] == 1 and out["sanada"]["d7"] == 2 and out["sanada"]["d30"] == 3
+        assert out["kujo"]["d1"] == 1 and out["kujo"]["d7"] == 1 and out["kujo"]["d30"] == 1
+        assert out["common"]["d1"] == 0 and out["common"]["d7"] == 0 and out["common"]["d30"] == 0
+
+    def test_windows_pct(self):
+        # 当窓 cur と 前窓 prev の比較で % が出る
+        rows = [
+            # d7: cur 2件（今週）
+            {"project_key": "knowhow", "tags": [], "content_head": "",
+             "created_at": "2026-06-15T00:00:00+00:00", "recall_count": 0},
+            {"project_key": "knowhow", "tags": [], "content_head": "",
+             "created_at": "2026-06-13T00:00:00+00:00", "recall_count": 0},
+            # d7: prev 1件（前週 = 2026-06-05〜06-12）
+            {"project_key": "knowhow", "tags": [], "content_head": "",
+             "created_at": "2026-06-08T00:00:00+00:00", "recall_count": 0},
+        ]
+        out = bucho.aggregate_compare(rows, self._WINDOWS)
+        assert out["sanada"]["d7"] == 2
+        assert out["sanada"]["d7_pct"] == 100.0   # (2-1)/1*100
+
+    def test_pct_none_when_no_prev(self):
+        rows = [{"project_key": "knowhow", "tags": [], "content_head": "",
+                 "created_at": "2026-06-19T00:00:00+00:00", "recall_count": 0}]
+        out = bucho.aggregate_compare(rows, self._WINDOWS)
+        assert out["sanada"]["d1"] == 1 and out["sanada"]["d1_pct"] is None
 
     def test_all_keys_present(self):
-        out = bucho.aggregate_compare([], "2026-06-18", "2026-06-12", "2026-05-20")
+        out = bucho.aggregate_compare([], self._WINDOWS)
         assert set(out.keys()) == set(bucho.BUCHO_KEYS)
+        assert "d30_pct" in out["sanada"]
 
 
 class TestMonthLabels:
