@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .omc/
 .pytest_cache/
+.backfill_tmp/
+.venv/
