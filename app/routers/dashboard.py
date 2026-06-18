@@ -901,6 +901,9 @@ class BuchoCard(BaseModel):
     added_prev: int
     growth_pct: float | None
     recalls: int
+    d1: int = 0
+    d7: int = 0
+    d30: int = 0
 
 
 class BuchoResponse(BaseModel):
@@ -920,6 +923,10 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     prev_since = now - timedelta(days=days * 2)
+    # 社長の比較ビュー：昨日(1日)・1週間・1か月の増えた数（期間ボタンとは独立）
+    day_since = now - timedelta(days=1)
+    week_since = now - timedelta(days=7)
+    month_since = now - timedelta(days=30)
 
     # NOTE: SQL側の left()/substr() は使わない。本DBでは文字関数がバイト単位で
     # 切れて不正UTF-8を生成し22021になる（2026-06-13 本番事故で実証）。
@@ -944,6 +951,11 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
         for r in rows
     ]
     buchos = bucho_calc.aggregate(data, since.isoformat(), prev_since.isoformat())
+    compare = bucho_calc.aggregate_compare(
+        data, day_since.isoformat(), week_since.isoformat(), month_since.isoformat()
+    )
+    for b in buchos:
+        b.update(compare.get(b["key"], {}))
     return BuchoResponse(
         days=days,
         since=since.strftime("%Y-%m-%d"),

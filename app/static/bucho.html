@@ -66,6 +66,13 @@ function setDays(n){
   load();
 }
 
+function cmpBox(label,n,color){
+  return `<div class="bg-gray-50 rounded-lg py-1.5 text-center" title="${label}で増えた知恵の数">
+    <div class="text-[11px] text-gray-400">${label}</div>
+    <div class="text-base font-bold" style="color:${color}">+${fmt(n)}</div>
+  </div>`;
+}
+
 function card(b,maxAdded){
   const bar=Math.round(b.added/Math.max(1,maxAdded)*100);
   const g=b.growth_pct;
@@ -89,6 +96,11 @@ function card(b,maxAdded){
     <div class="flex justify-between mt-2 text-sm text-gray-500">
       <span>これまでの知恵 <b class="text-gray-700">${fmt(b.total)}</b>件</span>
       <span title="この部長の知恵がAIに使われた回数">活躍 <b class="text-gray-700">${fmt(b.recalls)}</b>回</span>
+    </div>
+    <div class="grid grid-cols-3 gap-2 mt-3">
+      ${cmpBox('昨日', b.d1, b.color)}
+      ${cmpBox('1週間', b.d7, b.color)}
+      ${cmpBox('1か月', b.d30, b.color)}
     </div>
     <div class="mt-1.5">${trend}</div>
   </a>`;

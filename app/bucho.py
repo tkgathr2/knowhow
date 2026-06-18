@@ -145,6 +145,34 @@ def aggregate(rows: list[dict], since_iso: str, prev_since_iso: str) -> list[dic
     return out
 
 
+def aggregate_compare(
+    rows: list[dict], day_since: str, week_since: str, month_since: str
+) -> dict[str, dict]:
+    """各部長について『昨日1日 / 直近1週間 / 直近1か月』で増えた件数を返す。
+
+    社長の比較ビュー用（昨日より・一週間前より・1か月前と比べて）。
+    - d1: 昨日1日（直近24時間）で増えた数
+    - d7: 直近1週間で増えた数
+    - d30: 直近1か月（30日）で増えた数
+    rows は aggregate と同じ生データ（created_at は ISO 文字列で比較可）。
+    各 *_since は now からさかのぼった開始日時（ISO・新しいほど大きい文字列）。
+    戻り値は部長キー → {"d1","d7","d30"} の辞書。
+    """
+    stats = {k: {"d1": 0, "d7": 0, "d30": 0} for k in BUCHO_KEYS}
+    for r in rows:
+        key = classify(r.get("project_key", ""), r.get("tags"), r.get("content_head", ""))
+        created = str(r.get("created_at") or "")
+        if created < month_since:
+            continue
+        s = stats[key]
+        s["d30"] += 1
+        if created >= week_since:
+            s["d7"] += 1
+            if created >= day_since:
+                s["d1"] += 1
+    return stats
+
+
 def bucho_def(key: str) -> dict | None:
     for d in BUCHO_DEFS:
         if d["key"] == key:
