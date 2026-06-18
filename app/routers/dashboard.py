@@ -602,50 +602,66 @@ async def get_growth_daily(
 
     created_day = _day_expr(KbChunk.created_at)
 
-    # 日次カウント（資産・自動記録・整理）は条件集計で1クエリにまとめる。
-    # 以前は同じ範囲を3回フルスキャンしていた（ix_kb_chunks_created で範囲スキャン化）。
-    count_rows = await db.execute(
-        select(
-            created_day.label("d"),
-            func.count(case((KbChunk.source_type != _LOG_SOURCE, KbChunk.id))).label("asset"),
-            func.count(case((KbChunk.source_type == _LOG_SOURCE, KbChunk.id))).label("log"),
-            func.count(case((KbChunk.is_deprecated.is_(True), KbChunk.id))).label("dep"),
+    # 数字パート（日次カウント・前日累計・想起）は1往復にまとめる。
+    # 実測: app↔DB は1クエリ往復あたり数百ms（クエリの軽重でなく往復回数が効く）。
+    # 以前は別々の3クエリ＝3往復だった。CTEで1文にして1往復で全部取る。
+    # content には触れないので 22021（不正UTF-8）の心配は無い。
+    pk_clause = "AND project_key = :pk" if project_key else ""
+    bundle_sql = text(
+        f"""
+        WITH win AS (
+            SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS d,
+                   count(*) FILTER (WHERE source_type <> :log_src) AS asset,
+                   count(*) FILTER (WHERE source_type =  :log_src) AS log,
+                   count(*) FILTER (WHERE is_deprecated)           AS dep
+            FROM kb_chunks
+            WHERE created_at >= :since {pk_clause}
+            GROUP BY 1
+        ),
+        rec AS (
+            SELECT to_char(date_trunc('day', last_recalled_at), 'YYYY-MM-DD') AS d,
+                   count(*) AS c
+            FROM kb_chunks
+            WHERE last_recalled_at IS NOT NULL AND last_recalled_at >= :since {pk_clause}
+            GROUP BY 1
+        ),
+        base AS (
+            SELECT count(*) AS c
+            FROM kb_chunks
+            WHERE created_at < :since AND source_type <> :log_src {pk_clause}
         )
-        .where(*where)
-        .group_by(created_day)
+        SELECT 'win'::text AS kind, d, asset, log, dep, NULL::bigint AS rc FROM win
+        UNION ALL
+        SELECT 'rec'::text, d, NULL, NULL, NULL, c FROM rec
+        UNION ALL
+        SELECT 'base'::text, NULL, NULL, NULL, NULL, c FROM base
+        """
     )
+    params: dict = {"since": since, "log_src": _LOG_SOURCE}
+    if project_key:
+        params["pk"] = project_key
+    bundle = await db.execute(bundle_sql, params)
+
     asset_by_day: dict[str, int] = {}
     log_by_day: dict[str, int] = {}
     dep_by_day: dict[str, int] = {}
-    for r in count_rows:
-        if not r.d:
-            continue
-        if r.asset:
-            asset_by_day[r.d] = r.asset
-        if r.log:
-            log_by_day[r.d] = r.log
-        if r.dep:
-            dep_by_day[r.d] = r.dep
-
-    # 前日比の分母＝期間より前に既にあった「正味ナレッジ資産」の累計
-    base_where = [KbChunk.created_at < since, KbChunk.source_type != _LOG_SOURCE]
-    if project_key:
-        base_where.append(KbChunk.project_key == project_key)
-    base_before = int(
-        (await db.execute(select(func.count(KbChunk.id)).where(*base_where))).scalar() or 0
-    )
-
-    # その日に「使われた（想起された）」数は last_recalled_at で見る
-    recalled_day = _day_expr(KbChunk.last_recalled_at)
-    recalled_where = [KbChunk.last_recalled_at.isnot(None), KbChunk.last_recalled_at >= since]
-    if project_key:
-        recalled_where.append(KbChunk.project_key == project_key)
-    recalled_rows = await db.execute(
-        select(recalled_day.label("d"), func.count(KbChunk.id).label("c"))
-        .where(*recalled_where)
-        .group_by(recalled_day)
-    )
-    recalled_by_day = {r.d: r.c for r in recalled_rows if r.d}
+    recalled_by_day: dict[str, int] = {}
+    base_before = 0
+    for row in bundle:
+        if row.kind == "win":
+            if not row.d:
+                continue
+            if row.asset:
+                asset_by_day[row.d] = int(row.asset)
+            if row.log:
+                log_by_day[row.d] = int(row.log)
+            if row.dep:
+                dep_by_day[row.d] = int(row.dep)
+        elif row.kind == "rec":
+            if row.d:
+                recalled_by_day[row.d] = int(row.rc)
+        else:  # base
+            base_before = int(row.rc or 0)
 
     # その日に増えた「正味のナレッジ資産」の中身（新しい順）。
     # ここが最重）— 最大600行の本文(content)取得で、並行トラフィック時に
