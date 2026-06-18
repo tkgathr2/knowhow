@@ -66,16 +66,15 @@ function setDays(n){
   load();
 }
 
-function pctTag(pct,pctLabel){
-  if(pct==null) return `<div class="text-[10px] text-gray-300">${pctLabel} —</div>`;
-  const up=pct>=0;
-  return `<div class="text-[10px] font-semibold ${up?'text-emerald-600':'text-red-500'}" title="${pctLabel}（前の同じ期間と比べた伸び）">${pctLabel} ${up?'↑+':'↓'}${up?pct:Math.abs(pct)}%</div>`;
+function pctTag(pct,refLabel){
+  if(pct==null) return `<div class="text-[10px] text-gray-300" title="${refLabel}は知恵ゼロ＝比較対象なし">新規</div>`;
+  return `<div class="text-[10px] font-semibold text-emerald-600" title="${refLabel}の総数と比べた成長率（増えた数÷その時点の総数）">↑+${fmt(pct)}%</div>`;
 }
-function cmpBox(label,n,pct,pctLabel,color){
+function cmpBox(label,n,pct,refLabel,color){
   return `<div class="bg-gray-50 rounded-lg py-1.5 px-1 text-center" title="${label}で増えた知恵の数">
     <div class="text-[11px] text-gray-400">${label}</div>
     <div class="text-base font-bold" style="color:${color}">+${fmt(n)}</div>
-    ${pctTag(pct,pctLabel)}
+    ${pctTag(pct,refLabel)}
   </div>`;
 }
 
@@ -100,9 +99,9 @@ function card(b,maxAdded){
       <span title="この部長の知恵がAIに使われた回数">活躍 <b class="text-gray-700">${fmt(b.recalls)}</b>回</span>
     </div>
     <div class="grid grid-cols-3 gap-2 mt-3">
-      ${cmpBox('昨日', b.d1, b.d1_pct, '前日比', b.color)}
-      ${cmpBox('1週間', b.d7, b.d7_pct, '前週比', b.color)}
-      ${cmpBox('1か月', b.d30, b.d30_pct, '前月比', b.color)}
+      ${cmpBox('昨日', b.d1, b.d1_pct, '昨日', b.color)}
+      ${cmpBox('1週間', b.d7, b.d7_pct, '1週間前', b.color)}
+      ${cmpBox('1か月', b.d30, b.d30_pct, '1か月前', b.color)}
     </div>
   </a>`;
 }

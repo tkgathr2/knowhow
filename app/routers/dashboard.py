@@ -926,17 +926,12 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     prev_since = now - timedelta(days=days * 2)
-    # 社長の比較ビュー：昨日(1日)・1週間・1か月の増えた数と前同期間比%（期間ボタンとは独立）
+    # 社長の比較ビュー：昨日(1日)・1週間・1か月の増えた数（期間ボタンとは独立）
+    # %はその時点の総数に対する成長率（route側で growth_ratio で付与）。
     compare_windows = [
-        {"key": "d1",
-         "since": (now - timedelta(days=1)).isoformat(),
-         "prev_since": (now - timedelta(days=2)).isoformat()},
-        {"key": "d7",
-         "since": (now - timedelta(days=7)).isoformat(),
-         "prev_since": (now - timedelta(days=14)).isoformat()},
-        {"key": "d30",
-         "since": (now - timedelta(days=30)).isoformat(),
-         "prev_since": (now - timedelta(days=60)).isoformat()},
+        {"key": "d1", "since": (now - timedelta(days=1)).isoformat()},
+        {"key": "d7", "since": (now - timedelta(days=7)).isoformat()},
+        {"key": "d30", "since": (now - timedelta(days=30)).isoformat()},
     ]
 
     # NOTE: SQL側の left()/substr() は使わない。本DBでは文字関数がバイト単位で
@@ -964,7 +959,12 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
     buchos = bucho_calc.aggregate(data, since.isoformat(), prev_since.isoformat())
     compare = bucho_calc.aggregate_compare(data, compare_windows)
     for b in buchos:
-        b.update(compare.get(b["key"], {}))
+        c = compare.get(b["key"], {})
+        b.update(c)
+        # 成長率＝その時点の総数（total - 期間増加分）に対する増え方
+        b["d1_pct"] = bucho_calc.growth_ratio(c.get("d1", 0), b["total"])
+        b["d7_pct"] = bucho_calc.growth_ratio(c.get("d7", 0), b["total"])
+        b["d30_pct"] = bucho_calc.growth_ratio(c.get("d30", 0), b["total"])
     return BuchoResponse(
         days=days,
         since=since.strftime("%Y-%m-%d"),
