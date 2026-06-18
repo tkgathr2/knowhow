@@ -86,6 +86,20 @@ async def lifespan(app: FastAPI):
         )
     except Exception as e:  # noqa: BLE001
         _logger.warning("ranraners seed scheduling failed (ignored): %s", e)
+    # 各部署の日報30日分の冪等backfill（社長依頼 2026-06-19）。既存日報は上書きしない。
+    try:
+        from app.seed_nippou import maybe_seed_nippou
+
+        task2 = asyncio.create_task(maybe_seed_nippou())
+        _background_tasks.add(task2)
+        task2.add_done_callback(
+            lambda t: (
+                _background_tasks.discard(t),
+                t.cancelled() or (t.exception() and _logger.warning("nippou seed task failed: %s", t.exception())),
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("nippou seed scheduling failed (ignored): %s", e)
     yield
 
 
