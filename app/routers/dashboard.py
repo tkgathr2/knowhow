@@ -599,17 +599,30 @@ async def get_growth_daily(
 
     created_day = _day_expr(KbChunk.created_at)
 
-    async def _counts(extra) -> dict[str, int]:
-        rows = await db.execute(
-            select(created_day.label("d"), func.count(KbChunk.id).label("c"))
-            .where(*where, extra)
-            .group_by(created_day)
+    # 日次カウント（資産・自動記録・整理）は条件集計で1クエリにまとめる。
+    # 以前は同じ範囲を3回フルスキャンしていた（ix_kb_chunks_created で範囲スキャン化）。
+    count_rows = await db.execute(
+        select(
+            created_day.label("d"),
+            func.count(case((KbChunk.source_type != _LOG_SOURCE, KbChunk.id))).label("asset"),
+            func.count(case((KbChunk.source_type == _LOG_SOURCE, KbChunk.id))).label("log"),
+            func.count(case((KbChunk.is_deprecated.is_(True), KbChunk.id))).label("dep"),
         )
-        return {r.d: r.c for r in rows if r.d}
-
-    asset_by_day = await _counts(KbChunk.source_type != _LOG_SOURCE)
-    log_by_day = await _counts(KbChunk.source_type == _LOG_SOURCE)
-    dep_by_day = await _counts(KbChunk.is_deprecated.is_(True))
+        .where(*where)
+        .group_by(created_day)
+    )
+    asset_by_day: dict[str, int] = {}
+    log_by_day: dict[str, int] = {}
+    dep_by_day: dict[str, int] = {}
+    for r in count_rows:
+        if not r.d:
+            continue
+        if r.asset:
+            asset_by_day[r.d] = r.asset
+        if r.log:
+            log_by_day[r.d] = r.log
+        if r.dep:
+            dep_by_day[r.d] = r.dep
 
     # 前日比の分母＝期間より前に既にあった「正味ナレッジ資産」の累計
     base_where = [KbChunk.created_at < since, KbChunk.source_type != _LOG_SOURCE]
