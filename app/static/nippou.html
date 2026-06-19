@@ -10,55 +10,62 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700;800&display=swap');
-  :root{ --ink:#0f172a; --sub:#64748b; --line:#eef1f5; --brand:#6366f1; }
-  body{ font-family:'Inter','Noto Sans JP',sans-serif; background:#f5f6f8; color:var(--ink); -webkit-font-smoothing:antialiased; }
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;600;700&display=swap');
+  :root{ --ink:#0f172a; --sub:#64748b; --line:#e5e7eb; --accent:#1e3a8a; --accent2:#2f4fa0; }
+  body{ font-family:'Noto Sans JP',sans-serif; background:#e8eaee; color:var(--ink); -webkit-font-smoothing:antialiased; }
+  .serif{ font-family:'Noto Serif JP',serif; }
   .fade-in{ animation:fadeIn .35s cubic-bezier(.21,.61,.35,1); }
   @keyframes fadeIn{ from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
-  .card{ background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 4px 16px rgba(16,24,40,.05); }
-  .tab{ padding:7px 18px;font-size:.85rem;font-weight:600;border-radius:9999px;cursor:pointer;transition:all .18s;background:#fff;color:#64748b;border:1px solid var(--line); }
-  .tab.active{ background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:transparent;box-shadow:0 4px 12px rgba(99,102,241,.35); }
+  .panel{ background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 1px 2px rgba(15,23,42,.05); }
+  .report{ background:#fff;border:1px solid #e3e6ea;border-radius:8px;box-shadow:0 12px 44px rgba(15,23,42,.12),0 2px 8px rgba(15,23,42,.06); }
+  .tab{ padding:7px 18px;font-size:.85rem;font-weight:600;border-radius:6px;cursor:pointer;transition:all .18s;background:#fff;color:#64748b;border:1px solid var(--line); }
+  .tab.active{ background:var(--accent);color:#fff;border-color:transparent;box-shadow:0 3px 10px rgba(30,58,138,.3); }
   .tab:not(.active):hover{ background:#f8fafc;color:#334155; }
   .lbl{ font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8; }
-  /* 本文(markdown) */
-  .md{ color:#334155;font-size:.9rem; }
-  .md h1{ font-size:1.2rem;font-weight:800;color:var(--ink);margin:1.1em 0 .5em; }
-  .md h2{ font-size:1.05rem;font-weight:700;color:var(--ink);margin:1.3em 0 .55em;padding-left:.6em;border-left:3px solid #6366f1; }
-  .md h3{ font-size:.95rem;font-weight:700;color:#475569;margin:1em 0 .4em;padding-left:.55em;border-left:3px solid #c7d2fe; }
-  .md p{ margin:.55em 0;line-height:1.8; }
+  /* 本文(markdown) — 文書体裁 */
+  .md{ color:#334155;font-size:.92rem; }
+  .md h1{ font-family:'Noto Serif JP',serif;font-size:1.2rem;font-weight:700;color:var(--ink);margin:1.2em 0 .5em; }
+  .md h2{ font-family:'Noto Serif JP',serif;font-size:1.05rem;font-weight:700;color:var(--ink);margin:1.4em 0 .5em;padding-bottom:.3em;border-bottom:1px solid #e5e7eb; }
+  .md h3{ font-weight:700;color:#1e293b;margin:1.1em 0 .4em;padding-left:.6em;border-left:3px solid var(--accent); }
+  .md p{ margin:.55em 0;line-height:1.9; }
   .md ul{ list-style:none;padding-left:0;margin:.5em 0; }
-  .md ul>li{ position:relative;padding-left:1.15em;margin:.4em 0;line-height:1.75; }
-  .md ul>li::before{ content:"";position:absolute;left:.1em;top:.66em;width:6px;height:6px;border-radius:9999px;background:#a5b4fc; }
+  .md ul>li{ position:relative;padding-left:1.2em;margin:.42em 0;line-height:1.85; }
+  .md ul>li::before{ content:"";position:absolute;left:.15em;top:.7em;width:5px;height:5px;border-radius:1px;background:var(--accent);transform:rotate(45deg); }
   .md ol{ list-style:decimal;padding-left:1.4em;margin:.5em 0; }
-  .md ol>li{ margin:.4em 0;line-height:1.75; }
-  .md table{ border-collapse:separate;border-spacing:0;margin:.8em 0;font-size:.85rem;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden; }
-  .md th,.md td{ border-bottom:1px solid var(--line);padding:7px 12px;text-align:left; }
-  .md tr:last-child td{ border-bottom:none; }
-  .md th{ background:#f8fafc;font-weight:700;color:#475569; }
-  .md code{ background:#f1f5f9;padding:1px 6px;border-radius:6px;font-size:.85em;color:#4338ca; }
-  .md blockquote{ border-left:3px solid #c7d2fe;padding:.2em .9em;color:#64748b;margin:.6em 0;background:#f8fafc;border-radius:0 8px 8px 0; }
-  /* ===== 強調（上品に・3色基調） ===== */
-  .md strong{ color:#4338ca;font-weight:700; }                 /* **太字** はインディゴ */
-  .hl-yen{ color:#4338ca;font-weight:700; }                    /* 金額 */
-  .hl-num{ color:#0f172a;font-weight:700; }                    /* 件数・人数 */
+  .md ol>li{ margin:.42em 0;line-height:1.85; }
+  .md table{ border-collapse:collapse;margin:.9em 0;font-size:.85rem;width:100%;border:1px solid #d8dde4; }
+  .md th,.md td{ border:1px solid #e5e7eb;padding:8px 12px;text-align:left; }
+  .md th{ background:#f1f5f9;font-weight:700;color:#334155; }
+  .md code{ background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:.85em;color:#1e3a8a; }
+  .md blockquote{ border-left:3px solid #cbd5e1;padding:.2em .9em;color:#64748b;margin:.6em 0; }
+  /* ===== 強調（資料らしく抑制・要点だけ） ===== */
+  .md strong{ color:var(--accent);font-weight:700; }
+  .hl-yen{ color:#0f172a;font-weight:700; }
+  .hl-num{ color:#0f172a;font-weight:700; }
   .hl-pct{ color:#0f172a;font-weight:700; }
-  .hl-pct.good{ color:#059669; } .hl-pct.warn{ color:#d97706; } .hl-pct.bad{ color:#e11d48; }
-  .hl-up{ color:#059669;font-weight:700; }                     /* +増 */
-  .hl-down{ color:#e11d48;font-weight:700; }                   /* ▲減 */
-  .hl-kw{ color:#4338ca;font-weight:600; }                     /* 注目語(背景なしで上品) */
-  .hl-risk{ color:#e11d48;font-weight:600;background:#fff1f2;border-radius:5px;padding:0 5px; } /* リスクだけ淡い赤 */
-  .cite{ color:#b6bdc8;font-size:.82em;font-weight:400; }      /* 出典は控えめ */
+  .hl-pct.good{ color:#047857; } .hl-pct.warn{ color:#b45309; } .hl-pct.bad{ color:#b91c1c; }
+  .hl-up{ color:#047857;font-weight:700; }
+  .hl-down{ color:#b91c1c;font-weight:700; }
+  .hl-kw{ color:#1e293b;font-weight:700; }
+  .hl-risk{ color:#b91c1c;font-weight:700; }
+  .cite{ color:#aab2bd;font-size:.82em;font-weight:400; }
   ::-webkit-scrollbar{ width:8px;height:8px; }
-  ::-webkit-scrollbar-thumb{ background:#dfe3ea;border-radius:8px; }
-  ::-webkit-scrollbar-thumb:hover{ background:#cbd2dc; }
+  ::-webkit-scrollbar-thumb{ background:#cfd5dd;border-radius:8px; }
+  @media print{
+    body{ background:#fff; }
+    .no-print{ display:none !important; }
+    .report{ box-shadow:none;border:none;border-radius:0; }
+    .lg\:w-3\/4{ width:100% !important; }
+    @page{ margin:14mm; }
+  }
 </style>
 </head>
 <body class="min-h-screen">
 
-<nav class="bg-white/90 backdrop-blur border-b border-gray-200 sticky top-0 z-50">
+<nav class="no-print bg-white/90 backdrop-blur border-b border-gray-200 sticky top-0 z-50">
   <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:var(--accent)">
         <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
       </div>
       <h1 class="text-lg font-bold text-gray-900">日報</h1>
@@ -69,6 +76,7 @@
         <span id="auth-user"></span>
         <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
       </span>
+      <button onclick="window.print()" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">印刷 / PDF</button>
       <button onclick="load()" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">更新</button>
     </div>
   </div>
@@ -77,7 +85,7 @@
 <div class="max-w-6xl mx-auto px-4 py-7 space-y-5">
 
   <!-- 部署タブ -->
-  <div class="flex flex-wrap items-center gap-2.5">
+  <div class="no-print flex flex-wrap items-center gap-2.5">
     <span id="t-stepup" class="tab active" onclick="setDept('stepup')">ステップアップ</span>
     <span id="t-soumu" class="tab" onclick="setDept('soumu')">総務</span>
     <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導</span>
@@ -85,8 +93,8 @@
 
   <div class="flex flex-col lg:flex-row gap-5">
     <!-- 左：日付リスト -->
-    <div class="lg:w-1/4">
-      <div class="card overflow-hidden">
+    <div class="no-print lg:w-1/4">
+      <div class="panel overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-100">
           <h2 class="lbl">日付</h2>
         </div>
@@ -94,10 +102,10 @@
       </div>
     </div>
 
-    <!-- 右：本文 -->
+    <!-- 右：レポート -->
     <div class="lg:w-3/4">
       <div id="detail" class="fade-in min-h-[300px]">
-        <div class="card p-6"><p class="text-sm text-gray-400">読み込み中…</p></div>
+        <div class="report p-8"><p class="text-sm text-gray-400">読み込み中…</p></div>
       </div>
     </div>
   </div>
@@ -108,6 +116,7 @@ const API = window.location.origin;
 let dept = 'stepup';
 let reports = [];
 let selectedId = null;
+const DEPT_NAME={stepup:'ステップアップ事業部',soumu:'総務部',koutsu:'交通誘導事業部'};
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function renderMd(md){
@@ -117,7 +126,7 @@ function renderMd(md){
 
 async function api(path){try{const r=await fetch(API+path);if(!r.ok)return null;return await r.json();}catch{return null;}}
 
-// ===== パッと見て分かる強調：テキストノードだけを走査して重要語を色付け =====
+// ===== 要点強調：テキストノードだけを走査 =====
 const RISK_WORDS=['リスク','BAN','停止','凍結','未達','遅延','緊急','課題','問題','クレーム','失注','解約','離脱','炎上','不足'];
 const KW_WORDS=['内定','成約','受注','契約','獲得','過去最高','新規'];
 function hlRules(text){
@@ -173,8 +182,8 @@ function renderDateList(){
   if(!reports.length){box.innerHTML='<p class="p-4 text-xs text-gray-400">日報がありません</p>';return;}
   box.innerHTML=reports.map(r=>{
     const active=r.id===selectedId;
-    return `<button onclick="selectReport(${r.id})" class="w-full text-left px-4 py-3 border-l-[3px] transition ${active?'border-indigo-500 bg-indigo-50/70':'border-transparent hover:bg-slate-50'}">
-      <div class="text-sm font-bold ${active?'text-indigo-700':'text-slate-700'}">${esc(r.report_date)}</div>
+    return `<button onclick="selectReport(${r.id})" class="w-full text-left px-4 py-3 border-l-[3px] transition ${active?'border-[var(--accent)] bg-slate-50':'border-transparent hover:bg-slate-50'}">
+      <div class="text-sm font-bold ${active?'text-[var(--accent)]':'text-slate-700'}">${esc(r.report_date)}</div>
       <div class="text-xs text-slate-400 truncate mt-0.5">${esc(r.title||'(無題)')}</div>
     </button>`;
   }).join('');
@@ -188,26 +197,35 @@ const METRIC_LABELS={
 const FUNNEL_ORDER=['登録','面談','紹介','面接','内定'];
 function fmtYen(n){ return '¥'+Number(n).toLocaleString('ja-JP'); }
 
-// KPI統合カード（達成率プログレス＋主要数値を1枚に）
+// 章見出し（番号＋和文＋英字）
+function sec(num,jp,en){
+  return `<div class="flex items-baseline gap-3 mt-9 mb-4 pb-2 border-b-2 border-slate-800">
+    <span class="text-xs font-bold tracking-[0.18em]" style="color:var(--accent)">${num}</span>
+    <h3 class="serif text-base font-bold text-slate-900">${jp}</h3>
+    <span class="ml-auto text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase hidden sm:inline">${en}</span>
+  </div>`;
+}
+
+// 業績指標（達成率バー＋指標ボックス）
 function kpiBlock(m){
   if(!m||typeof m!=='object') return '';
   const pct=('achv_pct' in m)?(Number(m.achv_pct)||0):null;
   const skip=new Set(['funnel','achv_pct']);
   const stats=Object.entries(m).filter(([k])=>!skip.has(k));
   if(pct===null && !stats.length) return '';
-  let html='<div class="card p-5 mb-4">';
+  let html='';
   if(pct!==null){
     const w=Math.max(0,Math.min(100,pct));
-    const tone=pct>=100?'emerald':pct>=80?'amber':'rose';
-    const grad={emerald:'#10b981,#34d399',amber:'#f59e0b,#fbbf24',rose:'#f43f5e,#fb7185'}[tone];
-    const txt={emerald:'#059669',amber:'#d97706',rose:'#e11d48'}[tone];
-    html+=`<div class="flex items-end justify-between gap-3 mb-2.5">
-        <span class="lbl">月間達成率</span>
-        <span class="text-3xl font-extrabold leading-none" style="color:${txt}">${pct}<span class="text-xl">%</span></span>
+    const tone=pct>=100?'#047857':pct>=80?'#b45309':'#b91c1c';
+    html+=`<div class="mb-5">
+      <div class="flex items-end justify-between mb-2">
+        <span class="text-sm font-semibold text-slate-600">月間達成率</span>
+        <span class="serif text-2xl font-bold" style="color:${tone}">${pct}<span class="text-lg">%</span></span>
       </div>
-      <div class="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
-        <div class="h-full rounded-full" style="width:${w}%;background:linear-gradient(90deg,${grad})"></div>
-      </div>`;
+      <div class="h-2 w-full bg-slate-100 rounded-sm overflow-hidden border border-slate-200">
+        <div class="h-full" style="width:${w}%;background:${tone}"></div>
+      </div>
+    </div>`;
   }
   if(stats.length){
     const cells=stats.map(([k,v])=>{
@@ -216,83 +234,79 @@ function kpiBlock(m){
       if(v&&typeof v==='object') val=Object.entries(v).map(([a,b])=>`${a} ${b}`).join(' / ');
       else if(typeof v==='number'&&/(sales|total|target|amount|kingaku)/.test(k)) val=fmtYen(v);
       else if(typeof v==='number'&&/(pct|rate|ritsu)/.test(k)) val=v+'%';
-      return `<div><div class="lbl">${esc(label)}</div><div class="text-lg font-extrabold text-slate-800 mt-1 break-all">${esc(String(val))}</div></div>`;
+      return `<div class="flex-1 min-w-[140px] border-r border-b border-slate-200 px-4 py-3.5">
+        <div class="text-[11px] font-medium text-slate-500">${esc(label)}</div>
+        <div class="serif text-lg font-bold text-slate-900 mt-1 break-all">${esc(String(val))}</div>
+      </div>`;
     }).join('');
-    html+=`<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 ${pct!==null?'mt-4 pt-4 border-t border-slate-100':''}">${cells}</div>`;
+    html+=`<div class="flex flex-wrap border-t border-l border-slate-200 rounded-md overflow-hidden">${cells}</div>`;
   }
-  return html+'</div>';
+  return html;
 }
 
-// 採用ファネル（棒グラフで可視化）
+// 採用ファネル（棒グラフ・落ち着いた配色）
 function funnelView(f){
   if(!f||typeof f!=='object'||!Object.keys(f).length) return '';
   const keys=FUNNEL_ORDER.filter(k=>k in f).concat(Object.keys(f).filter(k=>!FUNNEL_ORDER.includes(k)));
   const vals=keys.map(k=>Number(f[k])||0);
   const max=Math.max(1,...vals);
   const cols=keys.map((k,i)=>{
-    const v=vals[i]; const h=Math.max(6,Math.round(v/max*64));
+    const v=vals[i]; const h=Math.max(5,Math.round(v/max*64));
     const goal=(k==='内定');
-    const bar=goal?'linear-gradient(180deg,#34d399,#10b981)':'linear-gradient(180deg,#a5b4fc,#6366f1)';
+    const bg=goal?'var(--accent)':'#94a3b8';
     return `<div class="flex-1 min-w-0 flex flex-col items-center">
-      <div class="text-lg font-extrabold ${goal?'text-emerald-600':'text-slate-800'} mb-1.5">${v}</div>
+      <div class="serif text-lg font-bold ${goal?'text-[var(--accent)]':'text-slate-700'} mb-1.5">${v}</div>
       <div class="h-16 w-full flex items-end justify-center">
-        <div class="w-8 sm:w-10 rounded-t-lg" style="height:${h}px;background:${bar}"></div>
+        <div class="w-8 sm:w-11 rounded-t-sm" style="height:${h}px;background:${bg}"></div>
       </div>
-      <div class="text-[11px] font-medium text-slate-500 mt-2 truncate w-full text-center">${esc(k)}</div>
+      <div class="text-[11px] font-medium text-slate-500 mt-2 pt-2 border-t border-slate-200 w-full text-center truncate">${esc(k)}</div>
     </div>`;
   }).join('');
-  return `<div class="card p-5 mb-4">
-    <div class="lbl mb-4">採用ファネル</div>
-    <div class="flex items-end gap-1.5">${cols}</div>
-  </div>`;
+  return `<div class="flex items-end gap-2 sm:gap-4 px-1">${cols}</div>`;
 }
 
 function renderDetail(){
   const box=document.getElementById('detail');
   const r=reports.find(x=>x.id===selectedId);
-  if(!r){box.innerHTML='<div class="card p-6"><p class="text-sm text-gray-400">日報を選んでください</p></div>';return;}
+  if(!r){box.innerHTML='<div class="report p-8"><p class="text-sm text-gray-400">日報を選んでください</p></div>';return;}
   const m=r.metrics||{};
+  const hasKpi=(m&&typeof m==='object'&&(('achv_pct' in m)||Object.keys(m).some(k=>k!=='funnel')));
+  let n=0; const num=()=>String(++n).padStart(2,'0');
   box.innerHTML=`
-    <!-- ヘッダー -->
-    <div class="mb-5">
-      <div class="flex items-center gap-3 flex-wrap">
-        <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">${esc(r.title||'(無題)')}</h2>
-        <span class="text-xs font-semibold text-slate-500 bg-white border border-slate-200 rounded-full px-3 py-1">${esc(r.report_date)}</span>
-      </div>
-      ${r.bucho?`<div class="text-sm font-semibold text-indigo-600 mt-1.5">${esc(r.bucho)}</div>`:''}
+   <div class="report p-7 sm:p-10">
+    <!-- 表題 -->
+    <div class="h-1.5 -mx-7 sm:-mx-10 -mt-7 sm:-mt-10 mb-7 rounded-t-[7px]" style="background:linear-gradient(90deg,var(--accent),var(--accent2))"></div>
+    <div class="flex items-center justify-between mb-4">
+      <div class="text-[11px] font-bold tracking-[0.22em] text-slate-500 uppercase">髙木産業グループ</div>
+      <div class="text-[10px] font-bold tracking-[0.22em] text-white px-2.5 py-1 rounded-sm" style="background:var(--accent)">DAILY REPORT</div>
+    </div>
+    <h2 class="serif text-2xl sm:text-[1.9rem] font-bold text-slate-900 leading-snug">${esc(r.title||'(無題)')}</h2>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-sm text-slate-500">
+      <span>${esc(DEPT_NAME[r.department]||DEPT_NAME[dept]||'')}</span>
+      <span class="text-slate-300">|</span>
+      <span>${esc(r.report_date)}</span>
+      ${r.bucho?`<span class="text-slate-300">|</span><span class="font-semibold text-slate-700">${esc(r.bucho)}</span>`:''}
     </div>
 
-    <!-- 今日の要点 -->
-    ${r.summary?`<div class="rounded-[18px] border border-indigo-100 p-5 mb-4" style="background:linear-gradient(135deg,#eef2ff,#faf5ff)">
-        <div class="flex items-center gap-2 mb-2.5">
-          <span class="inline-flex items-center justify-center w-7 h-7 rounded-xl text-white text-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">📌</span>
-          <span class="lbl" style="color:#6366f1">今日の要点</span>
-        </div>
-        <div class="text-sm text-slate-700 leading-[1.85] whitespace-pre-line" data-hl>${esc(r.summary)}</div>
-      </div>`:''}
+    ${r.summary?`${sec(num(),'エグゼクティブサマリー','Executive Summary')}
+      <div class="pl-4 border-l-2 border-slate-300 text-[15px] leading-[2] text-slate-700 whitespace-pre-line" data-hl>${esc(r.summary)}</div>`:''}
 
-    <!-- KPI -->
-    ${kpiBlock(m)}
-    ${funnelView(m.funnel)}
+    ${hasKpi?`${sec(num(),'業績指標','Key Metrics')}${kpiBlock(m)}`:''}
 
-    <!-- 部長コメント -->
-    ${r.bucho_comment?`<div class="card p-5 mb-4">
-        <div class="flex items-center gap-3 mb-3">
-          <div class="w-9 h-9 rounded-full flex items-center justify-center text-white shrink-0" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.3-3.9A7.96 7.96 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-          </div>
-          <div>
-            <div class="text-sm font-bold text-slate-800">${esc(r.bucho||'部長')}</div>
-            <div class="lbl" style="text-transform:none;letter-spacing:0">部長コメント</div>
-          </div>
-        </div>
-        <div class="text-sm text-slate-700 leading-[1.85]" data-hl>${esc(r.bucho_comment)}</div>
-      </div>`:''}
+    ${(m.funnel)?`${sec(num(),'採用ファネル','Recruitment Funnel')}${funnelView(m.funnel)}`:''}
 
-    <!-- 本文 -->
-    <div class="card p-6">
-      <div class="md" data-hl>${renderMd(r.body_md)}</div>
+    ${r.bucho_comment?`${sec(num(),'部長所見',"Director's Note")}
+      <blockquote class="border-l-2 border-slate-800 pl-5 text-[15px] leading-[2] text-slate-700" data-hl>${esc(r.bucho_comment)}</blockquote>
+      ${r.bucho?`<div class="text-right text-sm text-slate-500 mt-2.5">— ${esc(r.bucho)}</div>`:''}`:''}
+
+    ${r.body_md?`${sec(num(),'活動詳細','Details')}<div class="md" data-hl>${renderMd(r.body_md)}</div>`:''}
+
+    <!-- フッター -->
+    <div class="mt-10 pt-4 border-t border-slate-200 flex flex-wrap justify-between gap-2 text-[11px] text-slate-400">
+      <span>ノウハウキング君 — 自動生成レポート</span>
+      <span>${esc(r.report_date)}</span>
     </div>
+   </div>
   `;
   box.querySelectorAll('[data-hl]').forEach(highlight);
 }
@@ -324,7 +338,6 @@ async function load(){
 initDeptFromUrl();
 load();
 </script>
-<script src="/static/nippou-tabs.js"></script>
 <script src="/static/nav.js"></script>
 </body>
 </html>
