@@ -221,6 +221,14 @@ async def nippou_page():
     return FileResponse(_STATIC_DIR / "nippou.html")
 
 
+@app.get("/nippou/index", include_in_schema=False)
+async def nippou_index_page():
+    # 全部署を新しい順で一覧する日報インデックス（目次）。
+    return FileResponse(
+        _STATIC_DIR / "nippou-index.html", headers={"Cache-Control": "no-cache"}
+    )
+
+
 @app.get("/bucho/{key}", include_in_schema=False)
 async def bucho_detail_page(key: str):
     return FileResponse(_STATIC_DIR / "bucho-detail.html")
