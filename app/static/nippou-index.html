@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノウハウキング君 — 日報インデックス</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .tab { padding: 6px 16px; font-size: 0.85rem; font-weight: 600; border-radius: 8px; cursor: pointer; transition: all 0.15s; background: #f3f4f6; color: #6b7280; }
+  .tab.active { background: #4f46e5; color: white; }
+  .tab:not(.active):hover { background: #e5e7eb; }
+  .card { transition: box-shadow .15s, transform .15s, border-color .15s; }
+  .card:hover { box-shadow: 0 8px 20px -8px rgba(79,70,229,.35); transform: translateY(-2px); border-color: #c7d2fe; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      </div>
+      <h1 class="text-lg font-bold text-gray-900">日報インデックス</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">ノウハウキング君</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
+      <button onclick="load()" class="text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition">更新</button>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-6xl mx-auto px-4 py-6 space-y-5">
+
+  <!-- 部署タブ＋検索 -->
+  <div class="flex flex-wrap items-center gap-2">
+    <span id="t-all" class="tab active" onclick="setDept('all')">全部署</span>
+    <span id="t-stepup" class="tab" onclick="setDept('stepup')">ステップアップ</span>
+    <span id="t-soumu" class="tab" onclick="setDept('soumu')">総務</span>
+    <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導</span>
+    <div class="flex-1 min-w-[180px]"></div>
+    <div class="relative">
+      <input id="q" type="search" placeholder="キーワードで絞り込み（部長名・要点・本文）"
+        oninput="render()" autocomplete="off"
+        class="w-64 max-w-full text-sm pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300">
+      <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/></svg>
+    </div>
+  </div>
+
+  <!-- サマリーバー -->
+  <div id="summary" class="flex flex-wrap gap-3"></div>
+
+  <!-- 索引本体（日付ごとにグルーピング） -->
+  <div id="index" class="space-y-6 fade-in">
+    <p class="text-sm text-gray-400">読み込み中…</p>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let dept = 'all';
+let all = [];            // 全部署・全件（新しい順）
+const DEPT = {
+  stepup: { label: 'ステップアップ', badge: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
+  soumu:  { label: '総務',           badge: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  koutsu: { label: '交通誘導',       badge: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+};
+function deptInfo(k){ return DEPT[k] || { label: k || '—', badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' }; }
+
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+async function api(path){try{const r=await fetch(API+path);if(!r.ok)return null;return await r.json();}catch{return null;}}
+
+function setDept(d){
+  dept=d;
+  ['all','stepup','soumu','koutsu'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
+  render();
+}
+
+async function loadAuth(){
+  const d=await api('/auth/me');
+  if(d&&d.oauth_enabled&&d.user){
+    document.getElementById('auth-user').textContent=d.user;
+    document.getElementById('auth-box').classList.remove('hidden');
+    document.getElementById('auth-box').classList.add('flex');
+  }
+}
+
+function fmtYen(n){ return '¥'+Number(n).toLocaleString('ja-JP'); }
+
+// 1件のカードに出す注目KPI（あるものだけ）。
+function kpiChips(m){
+  if(!m||typeof m!=='object') return '';
+  const chips=[];
+  if(typeof m.sales_month==='number') chips.push(['月間売上', fmtYen(m.sales_month), 'text-indigo-700']);
+  if(typeof m.achv_pct==='number'){ const v=m.achv_pct; const c=v>=100?'text-green-600':v>=80?'text-amber-600':'text-red-600'; chips.push(['達成率', v+'%', c]); }
+  if(typeof m.naitei_today==='number') chips.push(['本日内定', m.naitei_today+'件', 'text-gray-700']);
+  if(typeof m.sales_today==='number') chips.push(['本日売上', fmtYen(m.sales_today), 'text-indigo-700']);
+  if(!chips.length) return '';
+  return `<div class="flex flex-wrap gap-x-4 gap-y-1 mt-2">`+chips.map(([l,v,c])=>
+    `<span class="text-xs text-gray-400">${esc(l)} <span class="text-sm font-bold ${c}">${esc(v)}</span></span>`).join('')+`</div>`;
+}
+
+function snippet(r){
+  const s=(r.summary||r.body_md||'').replace(/[#>*`_\-]/g,'').replace(/\s+/g,' ').trim();
+  return s.length>120 ? s.slice(0,120)+'…' : s;
+}
+
+function card(r){
+  const di=deptInfo(r.department);
+  const href=`/nippou?dept=${encodeURIComponent(r.department)}&id=${r.id}`;
+  return `<a href="${href}" class="card block bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${di.badge}">${esc(di.label)}</span>
+      <span class="text-xs text-gray-400">${esc(r.report_date)}</span>
+    </div>
+    <div class="text-sm font-bold text-gray-900 mt-1.5">${esc(r.title||'(無題)')}</div>
+    ${r.bucho?`<div class="text-xs font-medium text-indigo-600 mt-0.5">${esc(r.bucho)}</div>`:''}
+    ${snippet(r)?`<div class="text-xs text-gray-500 leading-relaxed mt-1.5">${esc(snippet(r))}</div>`:''}
+    ${kpiChips(r.metrics)}
+  </a>`;
+}
+
+function summaryBar(items){
+  const box=document.getElementById('summary');
+  if(!items.length){ box.innerHTML=''; return; }
+  const cnt={}; items.forEach(r=>cnt[r.department]=(cnt[r.department]||0)+1);
+  const total=items.length;
+  const dates=items.map(r=>r.report_date).filter(Boolean).sort();
+  const range=dates.length?`${dates[0]} 〜 ${dates[dates.length-1]}`:'';
+  const parts=[`<div class="bg-white border border-gray-200 rounded-lg px-3 py-2"><div class="text-[11px] text-gray-400">表示中の日報</div><div class="text-base font-bold text-gray-900">${total}件</div></div>`];
+  Object.keys(DEPT).forEach(k=>{ if(cnt[k]) parts.push(`<div class="bg-white border border-gray-200 rounded-lg px-3 py-2"><div class="text-[11px] text-gray-400">${esc(DEPT[k].label)}</div><div class="text-base font-bold text-gray-900">${cnt[k]}件</div></div>`); });
+  if(range) parts.push(`<div class="bg-white border border-gray-200 rounded-lg px-3 py-2"><div class="text-[11px] text-gray-400">期間</div><div class="text-sm font-bold text-gray-700">${esc(range)}</div></div>`);
+  box.innerHTML=parts.join('');
+}
+
+function render(){
+  const q=(document.getElementById('q').value||'').trim().toLowerCase();
+  let items=all.slice();
+  if(dept!=='all') items=items.filter(r=>r.department===dept);
+  if(q) items=items.filter(r=>{
+    const hay=[r.title,r.summary,r.body_md,r.bucho,r.bucho_comment].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+
+  summaryBar(items);
+
+  const box=document.getElementById('index');
+  if(!items.length){ box.innerHTML='<p class="text-sm text-gray-400 py-8 text-center">該当する日報がありません</p>'; return; }
+
+  // 日付ごとにグルーピング（新しい順）。各日内は部署順。
+  const order=Object.keys(DEPT);
+  const byDate={};
+  items.forEach(r=>{ (byDate[r.report_date]=byDate[r.report_date]||[]).push(r); });
+  const dates=Object.keys(byDate).sort((a,b)=>b<a?-1:b>a?1:0);
+  box.innerHTML=dates.map(d=>{
+    const list=byDate[d].sort((a,b)=>order.indexOf(a.department)-order.indexOf(b.department));
+    return `<div>
+      <div class="flex items-center gap-2 mb-2">
+        <h2 class="text-sm font-bold text-gray-700">${esc(d)}</h2>
+        <span class="text-xs text-gray-400">${list.length}件</span>
+        <div class="flex-1 h-px bg-gray-200"></div>
+      </div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${list.map(card).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+async function load(){
+  loadAuth();
+  // 部署を分けず一括取得（新しい順）。クライアント側でタブ/検索を適用。
+  const d=await api('/api/nippou?limit=365');
+  all=(d&&d.items)||[];
+  render();
+}
+
+// URLの ?dept= で初期タブを合わせる（日報ビューアとの行き来用）
+(function initFromUrl(){
+  const q=new URLSearchParams(location.search).get('dept');
+  if(q && ['all','stepup','soumu','koutsu'].includes(q)){
+    dept=q;
+    ['all','stepup','soumu','koutsu'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
+  }
+})();
+load();
+</script>
+<script src="/static/nav.js"></script>
+</body>
+</html>

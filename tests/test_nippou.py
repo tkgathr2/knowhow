@@ -125,3 +125,11 @@ def test_list_all_departments_when_unspecified(client):
     client.post("/api/nippou", json={"department": "soumu", "report_date": "2026-06-17", "title": "b"})
     g = client.get("/api/nippou")
     assert g.json()["count"] == 2
+
+
+def test_nippou_index_page_served(client):
+    # /nippou/index が索引HTMLを返すこと（目次ページ）。
+    r = client.get("/nippou/index")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "日報インデックス" in r.text

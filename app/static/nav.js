@@ -7,6 +7,7 @@
     ["/daily", "毎日ログ"],
     ["/bucho", "部長別"],
     ["/nippou", "日報"],
+    ["/nippou/index", "日報一覧"],
     ["/token-cutter", "コスト"],
     ["/anthropic-cost", "AIコスト"],
     ["/lore", "ロア"],
