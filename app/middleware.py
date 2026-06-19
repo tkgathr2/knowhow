@@ -36,6 +36,7 @@ _PROTECTED_API_PREFIXES = (
     "/api/koe/digest",
     "/api/koe/recordings",
     "/api/koe/signals",
+    "/api/koe/briefing",
 )
 _ALWAYS_OPEN_PREFIXES = ("/health", "/auth", "/static")
 

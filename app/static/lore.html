@@ -51,6 +51,22 @@
   <!-- 統計カード（トップページと同じ作り） -->
   <div id="stats-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
 
+  <!-- 経営判断シグナル（秋好モデル③④：録音から"社長が判断すべきこと"だけ自動抽出） -->
+  <section>
+    <div class="flex items-center gap-2 mb-3 flex-wrap">
+      <h2 class="text-base font-bold text-gray-800">🎯 経営判断シグナル</h2>
+      <span id="sig-date" class="text-xs text-gray-400"></span>
+      <span class="text-xs text-gray-400 ml-auto">録音から「決める・リスク・好機・宿題・不満・数字」だけAIが抜き出します</span>
+    </div>
+    <!-- 今朝のブリーフィング -->
+    <div id="brief-box" class="bg-gradient-to-br from-indigo-50 to-white rounded-xl shadow-sm border border-indigo-100 px-5 py-4 mb-3 hidden"></div>
+    <!-- 種別フィルタ -->
+    <div id="sig-filter" class="flex items-center gap-1.5 mb-3 flex-wrap text-xs"></div>
+    <!-- シグナル一覧 -->
+    <div id="sig-list" class="space-y-2"></div>
+    <div id="sig-empty" class="hidden p-8 text-center text-gray-400 text-sm bg-white rounded-xl border border-gray-200">まだ拾うべきシグナルはありません（録音が取り込まれると自動で出ます）。</div>
+  </section>
+
   <!-- 数日分まとめて -->
   <section>
     <div class="flex items-center gap-2 mb-3 flex-wrap">
@@ -224,11 +240,84 @@ function recRow(r){
   </div>`;
 }
 
+// --- 経営判断シグナル ---
+const SIG_TYPES={
+  decision:{e:'🟥',l:'要判断',c:'bg-red-100 text-red-700'},
+  risk:{e:'⚠️',l:'リスク',c:'bg-orange-100 text-orange-700'},
+  opportunity:{e:'💡',l:'好機',c:'bg-emerald-100 text-emerald-700'},
+  promise:{e:'✅',l:'宿題',c:'bg-blue-100 text-blue-700'},
+  complaint:{e:'🗣️',l:'現場の声',c:'bg-purple-100 text-purple-700'},
+  number:{e:'📊',l:'数字',c:'bg-cyan-100 text-cyan-700'},
+  other:{e:'📌',l:'その他',c:'bg-gray-100 text-gray-600'},
+};
+let sigFilter='';
+function sigMeta(t){return SIG_TYPES[t]||SIG_TYPES.other;}
+async function patchJSON(p,body){try{const r=await fetch(API+p,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok;}catch{return false;}}
+
+async function loadBriefing(){
+  const box=document.getElementById('brief-box');
+  const b=await getJSON('/api/koe/briefing');
+  if(!b||!b.total){box.classList.add('hidden');return;}
+  document.getElementById('sig-date').textContent='（最新：'+b.date+'）';
+  box.classList.remove('hidden');
+  box.innerHTML='<div class="md">'+marked.parse(b.briefing||'')+'</div>';
+}
+
+function sigCard(s){
+  const m=sigMeta(s.signal_type);
+  const who=s.who?'<span class="text-xs text-gray-400">〔'+esc(s.who)+'〕</span>':'';
+  const detail=s.detail?'<p class="text-xs text-gray-500 mt-1">'+esc(s.detail)+'</p>':'';
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-200 px-4 py-3 flex items-start gap-3">
+    <span class="tag ${m.c} shrink-0">${m.e} ${m.l}</span>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-sm font-semibold text-gray-800">${esc(s.title)}</span>
+        <span class="text-[11px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">重要度 ${s.importance}</span>
+        ${who}
+      </div>${detail}
+    </div>
+    <div class="flex gap-1 shrink-0">
+      <button onclick="sigAct(${s.id},'done')" class="text-xs px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition" title="対応済みにする">✔ 対応</button>
+      <button onclick="sigAct(${s.id},'dismissed')" class="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-500 hover:bg-gray-100 transition" title="今回は見送る">✕ 見送り</button>
+    </div>
+  </div>`;
+}
+
+async function sigAct(id,status){
+  const ok=await patchJSON('/api/koe/signals/'+id,{status});
+  if(ok){loadSignals();loadBriefing();}
+}
+
+function renderSigFilter(counts){
+  const total=Object.values(counts||{}).reduce((a,b)=>a+b,0);
+  const box=document.getElementById('sig-filter');
+  const chip=(key,label,n,active)=>`<span onclick="sigFilter='${key}';loadSignals()" class="seg ${active?'active':''}" style="cursor:pointer">${label}${n!=null?' '+n:''}</span>`;
+  let html=chip('','すべて',total,sigFilter==='');
+  for(const k in SIG_TYPES){if(counts[k])html+=chip(k,SIG_TYPES[k].e+SIG_TYPES[k].l,counts[k],sigFilter===k);}
+  box.innerHTML=html;
+}
+
+async function loadSignals(){
+  const list=document.getElementById('sig-list');const empty=document.getElementById('sig-empty');
+  const q='/api/koe/signals?status=open&limit=200'+(sigFilter?('&signal_type='+sigFilter):'');
+  const d=await getJSON(q);
+  // フィルタ用の全件カウント（種別チップ表示のため status=open 全件）
+  const all=sigFilter?await getJSON('/api/koe/signals?status=open&limit=200'):d;
+  const counts={};(all&&all.signals||[]).forEach(s=>{counts[s.signal_type]=(counts[s.signal_type]||0)+1;});
+  renderSigFilter(counts);
+  const rows=(d&&d.signals)||[];
+  if(!rows.length){list.innerHTML='';empty.classList.remove('hidden');return;}
+  empty.classList.add('hidden');
+  list.innerHTML=rows.map(sigCard).join('');
+}
+
 async function loadAll(){
   loadAuth();
   const today=new Date();const iso=today.toISOString().slice(0,10);
   document.getElementById('dg-date').value=iso;
   document.getElementById('dg-date').max=iso;
+  loadBriefing();
+  loadSignals();
   // 録音一覧・ダイジェスト件数を取って統計カードへ
   const [recs, dgTotal] = await Promise.all([
     getJSON('/api/koe/recordings?limit=200'),
