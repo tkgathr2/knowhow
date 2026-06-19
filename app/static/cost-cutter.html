@@ -50,6 +50,18 @@
 
   <div id="cards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
 
+  <!-- ムダ可視化: 当月のうち「割引ゼロの買い足し（追加利用）」がいくらか -->
+  <div id="waste" class="bg-rose-50 border border-rose-100 rounded-xl px-5 py-4 hidden">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+      <div>
+        <div class="text-sm text-rose-900 font-semibold">当月のムダ（割引ゼロの追加利用）</div>
+        <div id="waste-sub" class="text-xs text-rose-700 mt-0.5"></div>
+      </div>
+      <div class="text-3xl font-extrabold text-rose-600"><span id="waste-amt">—</span></div>
+    </div>
+    <div id="breakdown" class="mt-4 space-y-2"></div>
+  </div>
+
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
     <h2 class="font-semibold text-sm text-gray-700 mb-1">月次の実費用の推移</h2>
     <p class="text-xs text-gray-400 mb-3">棒=各月の実費用（円） / 破線=ピーク基準 / 当月は着地予測を薄く表示</p>
@@ -70,6 +82,7 @@ const API = window.location.origin;
 let chart;
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function fmt(n){return Number(n||0).toLocaleString('ja-JP');}
+function hjpy(n){n=Number(n||0);return n>=10000?(n/10000).toFixed(1)+'万円':fmt(n)+'円';}
 async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
 
 function card(label,value,sub,accent){
@@ -122,6 +135,22 @@ async function load(){
     card('月あたり削減額', '<span class="text-emerald-600">'+esc(d.reduction_jpy_human)+'</span>', '基準 − 当月着地予測'),
     card('年間削減見込み', '<span class="text-emerald-600">'+esc(d.annual_saving_jpy_human)+'</span>', '月の削減額 × 12'),
   ].join('');
+
+  // ムダ可視化（当月の追加利用＝割引ゼロの買い足し）
+  if((d.overage_jpy||0)>0){
+    const w=document.getElementById('waste');w.classList.remove('hidden');
+    document.getElementById('waste-amt').textContent=d.overage_jpy_human;
+    document.getElementById('waste-sub').innerHTML=`当月実費用 ${esc(d.current_jpy_human)} のうち <b>${d.overage_pct}%</b> が割引ゼロの買い足し（Maxの枠超過）。使用量を下げれば消えるお金です。`;
+    const bd=(d.breakdown||[]).filter(b=>b.jpy>0);
+    const maxJ=Math.max(1,...bd.map(b=>b.jpy));
+    const col=k=>k==='subscription'?'#6b7280':(k==='extra_usage'?'#e11d48':'#f59e0b');
+    document.getElementById('breakdown').innerHTML=bd.map(b=>`
+      <div class="flex items-center gap-2">
+        <span class="w-32 text-xs text-gray-700 truncate" title="${esc(b.label)}">${esc(b.label)}</span>
+        <span class="flex-1 h-3.5 bg-white rounded overflow-hidden border border-gray-100"><span style="display:block;height:100%;width:${Math.round(b.jpy/maxJ*100)}%;background:${col(b.kind)};border-radius:4px;"></span></span>
+        <span class="w-20 text-right text-xs font-semibold text-gray-800">${hjpy(b.jpy)}</span>
+      </div>`).join('');
+  }
 
   const t=d.token_cutter||{};
   document.getElementById('tc-sub').textContent=`直近${t.days||30}日 / 確定額ではなく「全部の助言に従っていたら避けられた上限額」`;

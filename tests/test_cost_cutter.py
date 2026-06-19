@@ -55,3 +55,30 @@ def test_reduction_zero_baseline():
 def test_annualized_saving():
     assert cc.annualized_saving(3_000_000, 600_000) == 2_400_000 * 12
     assert cc.annualized_saving(1_000_000, 1_500_000) == 0
+
+
+def test_assemble_breakdown_fixed_order_and_zero_fill():
+    out = cc.assemble_breakdown({"extra_usage": 1_200_000, "subscription": 30_000})
+    kinds = [b["kind"] for b in out]
+    assert kinds == ["subscription", "extra_usage", "api_credit", "other"]
+    by = {b["kind"]: b["jpy"] for b in out}
+    assert by["subscription"] == 30_000
+    assert by["extra_usage"] == 1_200_000
+    assert by["api_credit"] == 0  # 0埋め
+    # ラベルが付く
+    assert out[0]["label"] == "Maxプラン月額"
+
+
+def test_overage_excludes_subscription():
+    by_kind = {
+        "subscription": 30_000,
+        "extra_usage": 1_200_000,
+        "api_credit": 50_000,
+        "other": 1_000,
+    }
+    # ムダ＝subscription以外の合計
+    assert cc.overage_jpy(by_kind) == 1_200_000 + 50_000 + 1_000
+
+
+def test_overage_zero_when_only_subscription():
+    assert cc.overage_jpy({"subscription": 30_000}) == 0
