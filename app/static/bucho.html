@@ -125,7 +125,9 @@ async function load(){
   document.getElementById('narrative').textContent=
     `この${days}日で、会社の知恵は全部で ${fmt(total)}件 増えました。いちばん伸びたのは ${top.emoji} ${top.name}（+${fmt(top.added)}件）。カードを押すと、その部長の詳しいページが開きます。`;
   const maxAdded=Math.max(...d.buchos.map(b=>b.added),1);
-  cards.innerHTML=d.buchos.map(b=>card(b,maxAdded)).join('');
+  // 昨日いちばん増えた部長を上に（昨日の件数 d1 の降順。同数は1か月の多い順で安定化）
+  const ordered=[...d.buchos].sort((a,b)=>((b.d1||0)-(a.d1||0))||((b.d30||0)-(a.d30||0)));
+  cards.innerHTML=ordered.map(b=>card(b,maxAdded)).join('');
 }
 
 load();
