@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ノウハウキング君 — コストカッターα（削減率）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+<nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+      </div>
+      <h1 class="text-lg font-bold text-gray-900">コストカッターα</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">削減率ダッシュボード</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="auth-box" class="hidden items-center gap-2 text-xs text-gray-500">
+        <span id="auth-user"></span>
+        <a href="/auth/logout" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-lg">ログアウト</a>
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+  <div class="bg-emerald-50 border border-emerald-100 rounded-xl px-5 py-3 text-emerald-900 text-sm">
+    <b>コストカッターα</b> ＝ Claudeの利用料をどれだけ下げられたかを一目で見るページです。<b>ピーク月の実費用</b>と<b>当月の着地予測</b>を比べた削減率／削減額（出典＝AIコスト）に、<b>トークンカッターくん</b>の推定節約額を併記しています。
+  </div>
+
+  <!-- ヒーロー: 削減率 -->
+  <div id="hero" class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 text-center fade-in">
+    <div class="text-sm text-gray-500">削減率（ピーク月 → 当月着地予測）</div>
+    <div id="hero-pct" class="text-6xl font-extrabold text-emerald-600 mt-1">—</div>
+    <div id="hero-sub" class="text-sm text-gray-500 mt-2">読み込み中…</div>
+  </div>
+
+  <div id="cards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">月次の実費用の推移</h2>
+    <p class="text-xs text-gray-400 mb-3">棒=各月の実費用（円） / 破線=ピーク基準 / 当月は着地予測を薄く表示</p>
+    <div style="position:relative;height:260px;"><canvas id="monthly" role="img" aria-label="月次の実費用の推移"></canvas></div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">トークンカッターくんの貢献（推定）</h2>
+    <p id="tc-sub" class="text-xs text-gray-400 mb-3">重い手を着手前に検知し軽い手へ置換して避けた推定トークンの上限見積り</p>
+    <div id="tc" class="grid grid-cols-3 gap-4"></div>
+  </div>
+</div>
+
+<footer class="mt-12 py-4 text-center text-xs text-gray-400 border-t border-gray-100">ノウハウキング君 — コストカッターα（削減率）</footer>
+
+<script>
+const API = window.location.origin;
+let chart;
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function fmt(n){return Number(n||0).toLocaleString('ja-JP');}
+async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
+
+function card(label,value,sub,accent){
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 fade-in">
+    <div class="text-xs text-gray-500">${esc(label)}</div>
+    <div class="text-2xl font-bold ${accent||'text-gray-900'} mt-0.5">${value}</div>
+    <div class="text-xs text-gray-400 mt-0.5">${sub||''}</div></div>`;
+}
+
+function renderMonthly(d){
+  const labels=d.monthly.map(p=>p.month.slice(2));
+  const vals=d.monthly.map(p=>p.total_jpy);
+  // 当月は実績そのものではなく着地予測で見せる（棒は実績、薄い棒で予測の上積み）
+  const cur=d.current_month.slice(2);
+  const actual=d.monthly.map(p=>p.month.slice(2)===cur?d.current_jpy:p.total_jpy);
+  const projAdd=d.monthly.map(p=>p.month.slice(2)===cur?Math.max(0,d.projection_jpy-d.current_jpy):0);
+  const baseLine=d.monthly.map(()=>d.baseline_jpy||0);
+  if(chart)chart.destroy();
+  chart=new Chart(document.getElementById('monthly'),{
+    data:{labels,datasets:[
+      {type:'bar',label:'実費用',data:actual,backgroundColor:'#34d399',borderColor:'#059669',borderWidth:1,stack:'s',order:3},
+      {type:'bar',label:'当月の予測上積み',data:projAdd,backgroundColor:'rgba(52,211,153,0.35)',borderColor:'#34d399',borderWidth:1,borderDash:[4,3],stack:'s',order:3},
+      {type:'line',label:'ピーク基準',data:baseLine,borderColor:'#9ca3af',borderDash:[6,4],borderWidth:1.5,pointRadius:0,order:1}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:true,labels:{boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmt(c.parsed.y)+'円'}}},
+      scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true,ticks:{callback:v=>v>=10000?(v/10000)+'万':v}}}}
+  });
+}
+
+async function loadAuth(){
+  const d=await api('/auth/me');
+  if(d&&d.oauth_enabled&&d.user){document.getElementById('auth-user').textContent=d.user;const b=document.getElementById('auth-box');b.classList.remove('hidden');b.classList.add('flex');}
+}
+
+async function load(){
+  loadAuth();
+  const d=await api('/api/cost-cutter/stats?months=6&tc_days=30');
+  if(!d){document.getElementById('hero-sub').textContent='読み込みに失敗しました';return;}
+
+  document.getElementById('hero-pct').textContent=(d.reduction_pct||0)+'%';
+  document.getElementById('hero-sub').innerHTML = d.baseline_month
+    ? `基準 <b>${esc(d.baseline_month)}</b>（${esc(d.baseline_jpy_human)}） → 当月 <b>${esc(d.current_month)}</b> 着地予測 <b>${esc(d.projection_jpy_human)}</b>　＝ 月 <span class="text-emerald-600 font-semibold">${esc(d.reduction_jpy_human)}</span> の削減`
+    : '基準にできる完了済みの月がまだありません（来月から削減率が出ます）';
+
+  document.getElementById('cards').innerHTML=[
+    card('当月の着地予測', esc(d.projection_jpy_human), `${d.days_elapsed}/${d.days_in_month}日で日割り`, 'text-gray-900'),
+    card('ピーク月の実費用', esc(d.baseline_jpy_human), d.baseline_month?('基準 '+esc(d.baseline_month)):'—'),
+    card('月あたり削減額', '<span class="text-emerald-600">'+esc(d.reduction_jpy_human)+'</span>', '基準 − 当月着地予測'),
+    card('年間削減見込み', '<span class="text-emerald-600">'+esc(d.annual_saving_jpy_human)+'</span>', '月の削減額 × 12'),
+  ].join('');
+
+  const t=d.token_cutter||{};
+  document.getElementById('tc-sub').textContent=`直近${t.days||30}日 / 確定額ではなく「全部の助言に従っていたら避けられた上限額」`;
+  document.getElementById('tc').innerHTML=[
+    card('推定節約額', '<span class="text-emerald-600">'+esc(t.saved_jpy_human||'0円')+'</span>', '避けた推定トークンの金額'),
+    card('推定削減トークン', esc(t.est_tokens_human||'0'), `検知 ${fmt(t.events||0)} 回`),
+    card('検知・助言回数', fmt(t.events||0)+'<span class="text-xs text-gray-400"> 回</span>', '重い手を着手前に検知'),
+  ].join('');
+
+  renderMonthly(d);
+}
+load();
+</script>
+<script src="/static/nav.js"></script>
+</body>
+</html>
