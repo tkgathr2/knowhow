@@ -9,6 +9,7 @@
 <title>ロア — 録音アシスタント</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   body { font-family: 'Inter', sans-serif; }
@@ -179,7 +180,7 @@ function digestCard(date, digestMd, recCount, source, open){
       <span>${esc(date)}</span>
       <span class="text-xs font-normal text-gray-400">録音 ${recCount} 件 ${source==='fallback'?'（簡易版）':''}</span>
     </summary>
-    <div class="px-5 pb-4 md">${marked.parse(digestMd||'')}</div>
+    <div class="px-5 pb-4 md">${DOMPurify.sanitize(marked.parse(digestMd||''))}</div>
   </details>`;
 }
 
@@ -206,7 +207,7 @@ async function loadDigest(){
   const d=await getJSON('/api/koe/digest?date='+date);
   if(!d||!d.digest){box.innerHTML='<p class="text-sm text-gray-400">この日のダイジェストはまだありません。</p>';return;}
   box.innerHTML=`<div class="text-xs text-gray-400 mb-2">${esc(date)} ／ 録音 ${d.recording_count} 件 ${d.source==='fallback'?'（簡易版）':''}</div>
-    <div class="md fade-in">${marked.parse(d.digest)}</div>`;
+    <div class="md fade-in">${DOMPurify.sanitize(marked.parse(d.digest))}</div>`;
 }
 
 function hitCard(r){
@@ -251,6 +252,7 @@ const SIG_TYPES={
   other:{e:'📌',l:'その他',c:'bg-gray-100 text-gray-600'},
 };
 let sigFilter='';
+let sigDate='';
 function sigMeta(t){return SIG_TYPES[t]||SIG_TYPES.other;}
 async function patchJSON(p,body){try{const r=await fetch(API+p,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.ok;}catch{return false;}}
 
@@ -258,9 +260,10 @@ async function loadBriefing(){
   const box=document.getElementById('brief-box');
   const b=await getJSON('/api/koe/briefing');
   if(!b||!b.total){box.classList.add('hidden');return;}
+  sigDate=b.date;
   document.getElementById('sig-date').textContent='（最新：'+b.date+'）';
   box.classList.remove('hidden');
-  box.innerHTML='<div class="md">'+marked.parse(b.briefing||'')+'</div>';
+  box.innerHTML='<div class="md">'+DOMPurify.sanitize(marked.parse(b.briefing||''))+'</div>';
 }
 
 function sigCard(s){
@@ -299,10 +302,11 @@ function renderSigFilter(counts){
 
 async function loadSignals(){
   const list=document.getElementById('sig-list');const empty=document.getElementById('sig-empty');
-  const q='/api/koe/signals?status=open&limit=200'+(sigFilter?('&signal_type='+sigFilter):'');
+  const dp=sigDate?'&date='+sigDate:'';
+  const q='/api/koe/signals?status=open&limit=200'+dp+(sigFilter?('&signal_type='+sigFilter):'');
   const d=await getJSON(q);
   // フィルタ用の全件カウント（種別チップ表示のため status=open 全件）
-  const all=sigFilter?await getJSON('/api/koe/signals?status=open&limit=200'):d;
+  const all=sigFilter?await getJSON('/api/koe/signals?status=open&limit=200'+dp):d;
   const counts={};(all&&all.signals||[]).forEach(s=>{counts[s.signal_type]=(counts[s.signal_type]||0)+1;});
   renderSigFilter(counts);
   const rows=(d&&d.signals)||[];
@@ -316,7 +320,7 @@ async function loadAll(){
   const today=new Date();const iso=today.toISOString().slice(0,10);
   document.getElementById('dg-date').value=iso;
   document.getElementById('dg-date').max=iso;
-  loadBriefing();
+  await loadBriefing();
   loadSignals();
   // 録音一覧・ダイジェスト件数を取って統計カードへ
   const [recs, dgTotal] = await Promise.all([
