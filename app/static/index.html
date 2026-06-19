@@ -533,6 +533,7 @@ async function loadBriefing(){
   const card=document.getElementById('brief-card');
   const b=await api('/api/koe/briefing');
   if(!b||!b.total){card.classList.add('hidden');return;}
+  card.classList.remove('hidden');
   document.getElementById('brief-date').textContent='（最新：'+b.date+'）';
   const counts=b.counts||{};
   document.getElementById('brief-counts').innerHTML=Object.keys(SIG_META)
