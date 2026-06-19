@@ -49,6 +49,7 @@
     <span id="t-stepup" class="tab" onclick="setDept('stepup')">ステップアップ</span>
     <span id="t-soumu" class="tab" onclick="setDept('soumu')">総務</span>
     <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導</span>
+    <span id="t-daily" class="tab" onclick="setDept('daily')">毎日ログ</span>
     <div class="flex-1 min-w-[180px]"></div>
     <div class="relative">
       <input id="q" type="search" placeholder="キーワードで絞り込み（部長名・要点・本文）"
@@ -75,6 +76,7 @@ const DEPT = {
   stepup: { label: 'ステップアップ', badge: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
   soumu:  { label: '総務',           badge: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   koutsu: { label: '交通誘導',       badge: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  daily:  { label: '毎日ログ',       badge: 'bg-violet-100 text-violet-700', dot: 'bg-violet-500' },
 };
 function deptInfo(k){ return DEPT[k] || { label: k || '—', badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' }; }
 
@@ -83,7 +85,7 @@ async function api(path){try{const r=await fetch(API+path);if(!r.ok)return null;
 
 function setDept(d){
   dept=d;
-  ['all','stepup','soumu','koutsu'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
+  ['all','stepup','soumu','koutsu','daily'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
   render();
 }
 
@@ -106,6 +108,9 @@ function kpiChips(m){
   if(typeof m.achv_pct==='number'){ const v=m.achv_pct; const c=v>=100?'text-green-600':v>=80?'text-amber-600':'text-red-600'; chips.push(['達成率', v+'%', c]); }
   if(typeof m.naitei_today==='number') chips.push(['本日内定', m.naitei_today+'件', 'text-gray-700']);
   if(typeof m.sales_today==='number') chips.push(['本日売上', fmtYen(m.sales_today), 'text-indigo-700']);
+  // 毎日ログ用
+  if(typeof m.growth_pct==='number'){ const v=m.growth_pct; chips.push(['前日比', (v>=0?'+':'')+v+'%', v>=0?'text-emerald-600':'text-red-600']); }
+  if(typeof m.asset_added==='number'&&m.asset_added>0) chips.push(['新しい知恵', '+'+m.asset_added, 'text-violet-700']);
   if(!chips.length) return '';
   return `<div class="flex flex-wrap gap-x-4 gap-y-1 mt-2">`+chips.map(([l,v,c])=>
     `<span class="text-xs text-gray-400">${esc(l)} <span class="text-sm font-bold ${c}">${esc(v)}</span></span>`).join('')+`</div>`;
@@ -118,7 +123,7 @@ function snippet(r){
 
 function card(r){
   const di=deptInfo(r.department);
-  const href=`/nippou?dept=${encodeURIComponent(r.department)}&id=${r.id}`;
+  const href=r._href||`/nippou?dept=${encodeURIComponent(r.department)}&id=${r.id}`;
   return `<a href="${href}" class="card block bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3">
     <div class="flex items-center gap-2 flex-wrap">
       <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${di.badge}">${esc(di.label)}</span>
@@ -176,20 +181,44 @@ function render(){
   }).join('');
 }
 
+// 毎日ログ（成長の毎日ログ）を索引カードの形に変換して返す。
+// まとめ文（digest）＋数字（growth）を日付でマージし、1日=1カード。
+async function loadDaily(){
+  const [dg, gr] = await Promise.all([
+    api('/api/digest/daily?days=90'),
+    api('/api/growth/daily?days=90&light=1'),
+  ]);
+  const digestByDate={}, growthByDate={}, dates=new Set();
+  if(dg&&dg.entries) dg.entries.forEach(e=>{ digestByDate[e.date]=e; dates.add(e.date); });
+  if(gr&&gr.entries) gr.entries.forEach(e=>{ growthByDate[e.date]=e; dates.add(e.date); });
+  const items=[];
+  dates.forEach(date=>{
+    const d=digestByDate[date]||{}, g=growthByDate[date]||{};
+    items.push({
+      id:'daily-'+date, department:'daily', report_date:date,
+      title: d.headline || '毎日ログ', bucho:null,
+      summary: d.body || '',
+      metrics: { growth_pct: (g.growth_pct!=null?g.growth_pct:undefined), asset_added: (g.asset_added||0) },
+      _href:'/daily',
+    });
+  });
+  return items;
+}
+
 async function load(){
   loadAuth();
-  // 部署を分けず一括取得（新しい順）。クライアント側でタブ/検索を適用。
-  const d=await api('/api/nippou?limit=365');
-  all=(d&&d.items)||[];
+  // 日報（部署横断）＋毎日ログをまとめて取得し、日付混在の一覧にする。
+  const [d, daily]=await Promise.all([ api('/api/nippou?limit=365'), loadDaily() ]);
+  all=((d&&d.items)||[]).concat(daily||[]);
   render();
 }
 
 // URLの ?dept= で初期タブを合わせる（日報ビューアとの行き来用）
 (function initFromUrl(){
   const q=new URLSearchParams(location.search).get('dept');
-  if(q && ['all','stepup','soumu','koutsu'].includes(q)){
+  if(q && ['all','stepup','soumu','koutsu','daily'].includes(q)){
     dept=q;
-    ['all','stepup','soumu','koutsu'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
+    ['all','stepup','soumu','koutsu','daily'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
   }
 })();
 load();
