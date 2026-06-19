@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import koe_chunk, koe_digest, koe_filter, koe_logic, koe_tag
+from app import koe_briefing, koe_chunk, koe_digest, koe_filter, koe_logic, koe_tag
 from app.auth import require_api_key
 from app.config import settings
 from app.database import get_db
@@ -813,4 +813,68 @@ async def koe_signal_update(
         importance=row.importance,
         status=row.status,
         source_recording_id=row.source_recording_id,
+    )
+
+
+# --- 経営ブリーフィング（秋好モデル④：朝ひと目で把握）---
+
+
+class BriefingResponse(BaseModel):
+    date: str
+    total: int
+    counts: dict[str, int]
+    briefing: str  # Markdown
+
+
+async def _latest_signal_date(db: AsyncSession) -> date_cls | None:
+    """open シグナルが存在する最も新しい日（無ければ None）。"""
+    row = await db.execute(
+        select(func.max(KbSignal.signal_date)).where(
+            KbSignal.project_key == LORE_PROJECT, KbSignal.status == "open"
+        )
+    )
+    return row.scalar()
+
+
+@router.get("/koe/briefing", response_model=BriefingResponse)
+async def koe_briefing_get(
+    date: date_cls | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> BriefingResponse:
+    """指定日（無指定なら open シグナルがある最新日）の経営ブリーフィングを返す。
+
+    kb_signals の open を重要度順に種別ごとへまとめた Markdown（決定論・LLM不使用）。
+    秋好モデル④「朝起きたら把握」をダッシュボード/Slack の素材として提供する。
+    """
+    target = date or await _latest_signal_date(db)
+    if target is None:
+        return BriefingResponse(
+            date="", total=0, counts=koe_briefing.summarize_counts([]),
+            briefing="まだ拾うべきシグナルはありません。",
+        )
+    rows = await db.execute(
+        select(KbSignal)
+        .where(
+            KbSignal.project_key == LORE_PROJECT,
+            KbSignal.signal_date == target,
+            KbSignal.status == "open",
+        )
+        .order_by(KbSignal.importance.desc(), KbSignal.id.asc())
+    )
+    signals = [
+        {
+            "signal_type": r.signal_type,
+            "title": r.title,
+            "detail": r.detail,
+            "who": r.who,
+            "importance": r.importance,
+        }
+        for r in rows.scalars()
+    ]
+    date_label = target.isoformat()
+    return BriefingResponse(
+        date=date_label,
+        total=len(signals),
+        counts=koe_briefing.summarize_counts(signals),
+        briefing=koe_briefing.build_briefing_markdown(date_label, signals),
     )
