@@ -50,6 +50,7 @@
     <span id="t-soumu" class="tab" onclick="setDept('soumu')">総務</span>
     <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導</span>
     <span id="t-daily" class="tab" onclick="setDept('daily')">毎日ログ</span>
+    <span id="t-shikujiri" class="tab" onclick="setDept('shikujiri')">しくじり先生</span>
     <div class="flex-1 min-w-[180px]"></div>
     <div class="relative">
       <input id="q" type="search" placeholder="キーワードで絞り込み（部長名・要点・本文）"
@@ -77,6 +78,7 @@ const DEPT = {
   soumu:  { label: '総務',           badge: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   koutsu: { label: '交通誘導',       badge: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
   daily:  { label: '毎日ログ',       badge: 'bg-violet-100 text-violet-700', dot: 'bg-violet-500' },
+  shikujiri: { label: 'しくじり先生',  badge: 'bg-rose-100 text-rose-700', dot: 'bg-rose-500' },
 };
 function deptInfo(k){ return DEPT[k] || { label: k || '—', badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' }; }
 
@@ -85,7 +87,7 @@ async function api(path){try{const r=await fetch(API+path);if(!r.ok)return null;
 
 function setDept(d){
   dept=d;
-  ['all','stepup','soumu','koutsu','daily'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
+  ['all','stepup','soumu','koutsu','daily','shikujiri'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
   render();
 }
 
@@ -216,9 +218,9 @@ async function load(){
 // URLの ?dept= で初期タブを合わせる（日報ビューアとの行き来用）
 (function initFromUrl(){
   const q=new URLSearchParams(location.search).get('dept');
-  if(q && ['all','stepup','soumu','koutsu','daily'].includes(q)){
+  if(q && ['all','stepup','soumu','koutsu','daily','shikujiri'].includes(q)){
     dept=q;
-    ['all','stepup','soumu','koutsu','daily'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
+    ['all','stepup','soumu','koutsu','daily','shikujiri'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
   }
 })();
 load();
