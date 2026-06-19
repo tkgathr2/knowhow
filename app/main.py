@@ -16,6 +16,7 @@ from app.routers import (
     auth_oauth,
     auto_learn,
     bulk,
+    cost_cutter,
     dashboard,
     devin,
     digest,
@@ -141,6 +142,8 @@ app.include_router(devin.router, prefix="/api")      # /devin/recall=開放, /de
 app.include_router(token_cutter.router, prefix="/api")
 # anthropic-cost: /receipts=EP単位でKB_API_KEY保護 / /stats=閲覧保護(middleware)
 app.include_router(anthropic_cost.router, prefix="/api")
+# cost-cutter（コストカッターα）: /stats=閲覧保護(middleware)。既存テーブルを読むだけ＝開放。
+app.include_router(cost_cutter.router, prefix="/api")
 # 学びの自動ingest受け口（/auto-learn＝EP単位でKB_API_KEY保護。SessionEndフックが叩く）
 app.include_router(auto_learn.router, prefix="/api")
 # 1日のダイジェスト: /digest/daily=閲覧開放（middlewareでブラウザ保護） / /digest/run=EP単位で保護
@@ -242,6 +245,11 @@ async def token_cutter_page():
 @app.get("/anthropic-cost", include_in_schema=False)
 async def anthropic_cost_page():
     return FileResponse(_STATIC_DIR / "anthropic-cost.html")
+
+
+@app.get("/cost-cutter", include_in_schema=False)
+async def cost_cutter_page():
+    return FileResponse(_STATIC_DIR / "cost-cutter.html")
 
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")

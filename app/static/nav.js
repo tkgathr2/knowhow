@@ -9,6 +9,7 @@
     ["/bucho", "部長別"],
     ["/token-cutter", "コスト"],
     ["/anthropic-cost", "AIコスト"],
+    ["/cost-cutter", "削減率"],
     ["/lore", "ロア"],
   ];
 
