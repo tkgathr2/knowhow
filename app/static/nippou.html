@@ -89,6 +89,7 @@
     <span id="t-stepup" class="tab active" onclick="setDept('stepup')">ステップアップ</span>
     <span id="t-soumu" class="tab" onclick="setDept('soumu')">総務</span>
     <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導</span>
+    <span id="t-shikujiri" class="tab" onclick="setDept('shikujiri')">しくじり先生</span>
   </div>
 
   <div class="flex flex-col lg:flex-row gap-5">
@@ -116,7 +117,7 @@ const API = window.location.origin;
 let dept = 'stepup';
 let reports = [];
 let selectedId = null;
-const DEPT_NAME={stepup:'ステップアップ事業部',soumu:'総務部',koutsu:'交通誘導事業部'};
+const DEPT_NAME={stepup:'ステップアップ事業部',soumu:'総務部',koutsu:'交通誘導事業部',shikujiri:'しくじり先生'};
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function renderMd(md){
@@ -163,7 +164,7 @@ function highlight(root){
 
 function setDept(d){
   dept=d;
-  ['stepup','soumu','koutsu'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
+  ['stepup','soumu','koutsu','shikujiri'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
   selectedId=null;
   load();
 }
@@ -317,9 +318,9 @@ let wantId=null;  // ?id= で索引ページから来たときに開く日報
 function initDeptFromUrl(){
   const sp=new URLSearchParams(window.location.search);
   const q=sp.get('dept');
-  if(q && ['stepup','soumu','koutsu'].includes(q)){
+  if(q && ['stepup','soumu','koutsu','shikujiri'].includes(q)){
     dept=q;
-    ['stepup','soumu','koutsu'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
+    ['stepup','soumu','koutsu','shikujiri'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
   }
   const idp=parseInt(sp.get('id'),10);
   if(Number.isFinite(idp)) wantId=idp;
