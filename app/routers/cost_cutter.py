@@ -31,6 +31,12 @@ class MonthlyPoint(BaseModel):
     total_jpy: int
 
 
+class KindPoint(BaseModel):
+    kind: str
+    label: str
+    jpy: int
+
+
 class TokenCutterContribution(BaseModel):
     days: int
     events: int
@@ -58,6 +64,10 @@ class CostCutterStats(BaseModel):
     days_elapsed: int
     days_in_month: int
     monthly: list[MonthlyPoint]
+    breakdown: list[KindPoint]
+    overage_jpy: int
+    overage_jpy_human: str
+    overage_pct: float
     token_cutter: TokenCutterContribution
 
 
@@ -107,6 +117,25 @@ async def get_stats(
     baseline_month = baseline["month"] if baseline else None
     baseline_jpy = int(baseline["total_jpy"]) if baseline else 0
 
+    # 当月の種別内訳（何で燃えているか）。subscription以外＝overage＝割引ゼロの買い足し＝ムダ。
+    cur_month_start = date(today.year, today.month, 1)
+    kind_rows = (
+        await db.execute(
+            select(
+                KbAnthropicReceipt.kind,
+                func.coalesce(func.sum(KbAnthropicReceipt.total_jpy), 0),
+            )
+            .where(KbAnthropicReceipt.receipt_date >= cur_month_start)
+            .group_by(KbAnthropicReceipt.kind)
+        )
+    ).all()
+    by_kind_jpy = {(k or "other"): int(j or 0) for k, j in kind_rows}
+    breakdown = cc.assemble_breakdown(by_kind_jpy)
+    overage = cc.overage_jpy(by_kind_jpy)
+    overage_pct = (
+        round(overage / current_jpy * 100, 1) if current_jpy > 0 else 0.0
+    )
+
     red = cc.reduction(baseline_jpy, projection_jpy)
     annual = cc.annualized_saving(baseline_jpy, projection_jpy)
 
@@ -141,6 +170,10 @@ async def get_stats(
         days_elapsed=today.day,
         days_in_month=ac.days_in_month(today),
         monthly=[MonthlyPoint(**m) for m in monthly],
+        breakdown=[KindPoint(**b) for b in breakdown],
+        overage_jpy=overage,
+        overage_jpy_human=ac.humanize_jpy(overage),
+        overage_pct=overage_pct,
         token_cutter=TokenCutterContribution(
             days=tc_days,
             events=tc_events,

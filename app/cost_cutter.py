@@ -44,3 +44,29 @@ def annualized_saving(baseline_jpy: int, projection_jpy: int) -> int:
     """月次の削減額（基準-着地予測）を12倍した年間削減見込み。増加時は0。"""
     cut = max(0, int(baseline_jpy or 0) - int(projection_jpy or 0))
     return cut * 12
+
+
+# 種別の日本語ラベル（コストカッターαの「ムダ可視化」用）。
+# subscription = Maxプラン月額（必要経費）。それ以外は overage＝割引ゼロの買い足し＝削れる対象。
+KIND_LABELS = {
+    "subscription": "Maxプラン月額",
+    "extra_usage": "追加利用（割引ゼロ）",
+    "api_credit": "APIクレジット",
+    "other": "その他",
+}
+# 「ムダ（overage）」＝サブスク月額以外。本来は使用量を枠内に収めれば消える買い足し。
+OVERAGE_KINDS = ("extra_usage", "api_credit", "other")
+
+
+def assemble_breakdown(by_kind_jpy: dict[str, int]) -> list[dict]:
+    """当月の種別内訳を {kind, label, jpy} の固定順リストにする（0埋め）。"""
+    order = ("subscription", "extra_usage", "api_credit", "other")
+    return [
+        {"kind": k, "label": KIND_LABELS[k], "jpy": int(by_kind_jpy.get(k) or 0)}
+        for k in order
+    ]
+
+
+def overage_jpy(by_kind_jpy: dict[str, int]) -> int:
+    """ムダ＝サブスク月額以外（追加利用・クレジット・その他）の合計。"""
+    return sum(int(by_kind_jpy.get(k) or 0) for k in OVERAGE_KINDS)
