@@ -1,17 +1,23 @@
 // ノウハウキング 共通ナビ。全ダッシュボードのヘッダーに同じリンク列を注入する。
 // 各ページは <script src="/static/nav.js"></script> を読み込むだけ。リンク追加はここ1箇所。
 (function () {
+  // 日報・日報一覧・毎日ログは「日報」ハブに集約（ハブ内のサブタブで切替＝nippou-tabs.js）。
   var LINKS = [
     ["/", "ホーム"],
+    ["/nippou/index", "日報"],
     ["/growth", "成長"],
-    ["/daily", "毎日ログ"],
     ["/bucho", "部長別"],
-    ["/nippou", "日報"],
-    ["/nippou/index", "日報一覧"],
     ["/token-cutter", "コスト"],
     ["/anthropic-cost", "AIコスト"],
     ["/lore", "ロア"],
   ];
+
+  // 「日報」ハブ配下（/nippou・/nippou/index・/daily）はどれを開いていても「日報」を点灯。
+  function isActive(href, path) {
+    if (href === "/") return path === "/";
+    if (href === "/nippou/index") return path.indexOf("/nippou") === 0 || path === "/daily";
+    return path === href;
+  }
 
   function build() {
     var nav = document.querySelector("nav");
@@ -38,7 +44,7 @@
       var a = document.createElement("a");
       a.href = href;
       a.textContent = label;
-      var active = href === "/" ? path === "/" : path === href;
+      var active = isActive(href, path);
       a.className =
         "text-sm px-3 py-1.5 rounded-lg transition whitespace-nowrap shrink-0 " +
         (active
