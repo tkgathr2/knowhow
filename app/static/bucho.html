@@ -68,7 +68,7 @@ function setDays(n){
 
 function pctTag(pct,refLabel){
   if(pct==null) return `<div class="text-[10px] text-gray-300" title="${refLabel}は知恵ゼロ＝比較対象なし">新規</div>`;
-  return `<div class="text-[10px] font-semibold text-emerald-600" title="${refLabel}の総数と比べた成長率（増えた数÷その時点の総数）">↑+${fmt(pct)}%</div>`;
+  return `<div class="text-[10px] font-semibold text-emerald-600" title="${refLabel}と比べた増加率（増えた件数÷その時点の総数）。あくまで"件数が増えた量"であって、役立ち度＝活躍とは別物です。">↑+${fmt(pct)}%</div>`;
 }
 function cmpBox(label,n,pct,refLabel,color){
   return `<div class="bg-gray-50 rounded-lg py-1.5 px-1 text-center" title="${label}で増えた知恵の数">
@@ -96,9 +96,10 @@ function card(b,maxAdded){
     <div class="h-2 bg-gray-100 rounded mt-2 overflow-hidden"><span style="display:block;height:100%;width:${bar}%;background:${b.color};border-radius:4px;"></span></div>
     <div class="flex justify-between mt-2 text-sm text-gray-500">
       <span>これまでの知恵 <b class="text-gray-700">${fmt(b.total)}</b>件</span>
-      <span title="この部長の知恵がAIに使われた回数">活躍 <b class="text-gray-700">${fmt(b.recalls)}</b>回</span>
+      <span title="この部長の知恵が実際にAIに使われた回数。増えた量とは別の、本当の役立ち（成長）の目安。">🌱 本当の成長＝活躍 <b class="text-emerald-700">${fmt(b.recalls)}</b>回</span>
     </div>
-    <div class="grid grid-cols-3 gap-2 mt-3">
+    <div class="text-[11px] text-gray-400 mt-3 mb-1">📦 増えた件数（量）と増加率<span class="text-gray-300">（"増えた"＝量。"成長"は上の活躍で見る）</span></div>
+    <div class="grid grid-cols-3 gap-2">
       ${cmpBox('昨日', b.d1, b.d1_pct, '昨日', b.color)}
       ${cmpBox('1週間', b.d7, b.d7_pct, '1週間前', b.color)}
       ${cmpBox('1か月', b.d30, b.d30_pct, '1か月前', b.color)}
