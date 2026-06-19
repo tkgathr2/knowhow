@@ -65,6 +65,17 @@
 
   <div id="stats-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></div>
 
+  <!-- 今朝の経営ブリーフィング（録音から"社長が判断すべきこと"だけ自動抽出） -->
+  <div id="brief-card" class="hidden bg-gradient-to-br from-indigo-50 to-white rounded-xl shadow-sm border border-indigo-100 p-5 mb-6">
+    <div class="flex items-baseline gap-2 mb-3 flex-wrap">
+      <h2 class="font-semibold text-sm text-gray-700">🎯 今朝の経営ブリーフィング</h2>
+      <span id="brief-date" class="text-xs text-gray-400"></span>
+      <a href="/lore" class="text-xs text-indigo-500 underline ml-auto">シグナル一覧（ロア）へ →</a>
+    </div>
+    <div id="brief-counts" class="flex flex-wrap gap-1.5 mb-3 text-xs"></div>
+    <div id="brief-list" class="space-y-1.5"></div>
+  </div>
+
   <!-- 各部署の最新日報（担当部長コメントつき） -->
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-6">
     <div class="flex items-baseline gap-2 mb-3 flex-wrap">
@@ -514,10 +525,33 @@ async function loadAuth() {
   }
 }
 
+const SIG_META={
+  decision:{e:'🟥',l:'要判断'},risk:{e:'⚠️',l:'リスク'},opportunity:{e:'💡',l:'好機'},
+  promise:{e:'✅',l:'宿題'},complaint:{e:'🗣️',l:'現場の声'},number:{e:'📊',l:'数字'},other:{e:'📌',l:'その他'},
+};
+async function loadBriefing(){
+  const card=document.getElementById('brief-card');
+  const b=await api('/api/koe/briefing');
+  if(!b||!b.total){card.classList.add('hidden');return;}
+  document.getElementById('brief-date').textContent='（最新：'+b.date+'）';
+  const counts=b.counts||{};
+  document.getElementById('brief-counts').innerHTML=Object.keys(SIG_META)
+    .filter(k=>counts[k]).map(k=>`<span class="px-2 py-0.5 rounded-full bg-white border border-indigo-100 text-gray-600">${SIG_META[k].e}${SIG_META[k].l} ${counts[k]}</span>`).join('');
+  // 重要度の高い上位シグナルをトップに数件
+  const d=await api('/api/koe/signals?status=open&limit=6');
+  const rows=(d&&d.signals)||[];
+  document.getElementById('brief-list').innerHTML=rows.map(s=>{
+    const m=SIG_META[s.signal_type]||SIG_META.other;
+    const who=s.who?` <span class="text-gray-400">〔${esc(s.who)}〕</span>`:'';
+    return `<div class="flex items-center gap-2 text-sm"><span class="shrink-0">${m.e}</span><span class="text-[11px] font-bold px-1.5 py-0.5 rounded bg-white border border-gray-200 text-gray-500 shrink-0">${s.importance}</span><span class="text-gray-800 truncate">${esc(s.title)}${who}</span></div>`;
+  }).join('')+(b.total>rows.length?`<a href="/lore" class="block text-xs text-indigo-500 underline pt-1">ほか${b.total-rows.length}件をロアで見る →</a>`:'');
+}
+
 function loadAll() {
   loadAuth();
   checkHealth();
   loadStats();
+  loadBriefing();
   loadNippouLatest();
   loadRecent();
   loadTags();
