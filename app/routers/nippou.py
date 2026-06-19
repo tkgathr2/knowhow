@@ -27,7 +27,7 @@ router = APIRouter(tags=["nippou"])
 _WRITE_GUARD = [Depends(require_api_key)]
 
 # 表示順や絞り込みで使う部署キー。'stepup' が本命、他は将来用。
-DEPARTMENTS = ("stepup", "soumu", "koutsu")
+DEPARTMENTS = ("stepup", "soumu", "koutsu", "shikujiri")
 
 
 class NippouRequest(BaseModel):
