@@ -4,3 +4,7 @@ __pycache__/
 .pytest_cache/
 .backfill_tmp/
 .venv/
+
+# Local backfill / one-shot data files in scripts/
+# These may contain billing amounts or row data not meant for the repo.
+scripts/*.json
