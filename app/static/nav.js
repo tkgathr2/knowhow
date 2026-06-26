@@ -63,6 +63,18 @@
     });
   }
 
+
+  // カイゼンくんウィジェット：全ページに表示（knowhow は認証後のみアクセス可）
+  (function() {
+    if (document.querySelector('script[data-kaizen-knowhow]')) return;
+    var s = document.createElement('script');
+    s.src = 'https://kaizen.takagi.bz/widget.js';
+    s.setAttribute('data-sys', 'knowhow');
+    s.setAttribute('data-kaizen-knowhow', '1');
+    s.defer = true;
+    document.head.appendChild(s);
+  })();
+
   if (document.readyState !== "loading") build();
   else document.addEventListener("DOMContentLoaded", build);
 })();
