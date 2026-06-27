@@ -1,0 +1,95 @@
+/* =========================================================================
+   ノウハウキング君 — 全ページ共通レスポンシブ補強 (KZ-21)
+   nav.js が全ページに自動注入する。各ページの個別マークアップは触らず、
+   モバイル(〜640px)でのみ効く安全な"効かせ直し"だけを行う。
+   PC表示(>=641px)には一切影響しない（全ルールを max-width で囲う）。
+   ========================================================================= */
+
+/* --- 1. 横スクロール（はみ出し）の根絶 ---------------------------------- */
+/* どの画面幅でも横スクロールが出ないように土台を固める。
+   個別要素の幅指定は壊さず、ビューポート由来の溢れだけ抑える。 */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+/* iPhone のノッチ/ホームバー安全領域に本文がかぶらないように */
+body {
+  -webkit-text-size-adjust: 100%; /* 横向き時の勝手な文字拡大を抑止 */
+}
+
+/* メディアやコードなど、はみ出しやすい要素の保険 */
+img, svg, video, canvas, table, pre {
+  max-width: 100%;
+}
+pre {
+  white-space: pre-wrap;       /* 長いコードログで横スクロールさせない */
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  /* --- 2. ページ余白をモバイル向けに少し詰める -------------------------- */
+  /* px-4(16px) を 12px へ。Tailwind の px-* を上書きしすぎないよう mx-auto
+     の中央寄せコンテナにだけ効かせる。 */
+  .max-w-7xl.mx-auto,
+  .max-w-6xl.mx-auto,
+  .max-w-5xl.mx-auto,
+  .max-w-4xl.mx-auto,
+  .max-w-3xl.mx-auto {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  /* --- 3. 大見出しのフォントをモバイルで縮める ------------------------- */
+  /* 数字ダッシュの巨大カウンタ等が画面からはみ出す/詰まるのを防ぐ */
+  .text-5xl { font-size: 2.25rem; line-height: 1.1; }
+  .text-4xl { font-size: 1.875rem; line-height: 1.15; }
+  .text-3xl { font-size: 1.5rem;  line-height: 1.2; }
+  .text-2xl { font-size: 1.35rem; line-height: 1.25; }
+
+  /* --- 4. タップ領域を 44px 以上に（Apple HIG / WCAG 2.5.5） ----------- */
+  /* ナビリンク・タブ・ボタン・検索など、指で押す要素の縦を確保する。
+     見た目を崩さないよう min-height とタテ中央寄せのみ付与。 */
+  nav a,
+  .tab,
+  .tab-btn,
+  button,
+  a.btn,
+  [role="button"],
+  select {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  /* アイコンだけの小ボタンは最低 44x44 を確保 */
+  nav a.icon-only,
+  button.icon-only {
+    min-width: 44px;
+    justify-content: center;
+  }
+
+  /* --- 5. フォーム/入力をモバイルで使いやすく ------------------------- */
+  /* iOS で fontSize<16px だとフォーカス時に自動ズームしてしまう。16px に底上げ。
+     幅は親いっぱいに広げて押しやすく。 */
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    font-size: 16px;
+    max-width: 100%;
+  }
+  /* 検索ボックス類（w-64 等の固定幅）を画面幅に追従させる */
+  input[type="search"],
+  input[type="text"],
+  input[type="email"],
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* --- 6. 横一列で溢れがちなツールバー/フィルタ行の保険 --------------- */
+  /* 「flex で横並び・折り返し無し」の行がモバイルで切れないよう、
+     既存マークアップに flex-nowrap が無い限り折り返しを許可する。 */
+  .flex.items-center.gap-2:not(.flex-nowrap),
+  .flex.items-center.gap-3:not(.flex-nowrap) {
+    flex-wrap: wrap;
+  }
+}
