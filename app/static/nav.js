@@ -1,6 +1,17 @@
 // ノウハウキング 共通ナビ。全ダッシュボードのヘッダーに同じリンク列を注入する。
 // 各ページは <script src="/static/nav.js"></script> を読み込むだけ。リンク追加はここ1箇所。
 (function () {
+  // 全ページ共通レスポンシブ補強CSS（KZ-21）。<head>に1回だけ注入する。
+  // これにより現在・将来の全ページがモバイル(〜640px)で破綻しない。
+  (function injectResponsiveCss() {
+    if (document.querySelector('link[data-knowhow-responsive]')) return;
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/static/responsive.css';
+    link.setAttribute('data-knowhow-responsive', '1');
+    document.head.appendChild(link);
+  })();
+
   // 日報・日報一覧・毎日ログは「日報」ハブに集約（ハブ内のサブタブで切替＝nippou-tabs.js）。
   var LINKS = [
     ["/", "ホーム"],
@@ -61,6 +72,10 @@
     Array.prototype.forEach.call(cont.children, function (el) {
       el.classList.add("shrink-0", "whitespace-nowrap");
     });
+
+    // モバイル対応：ナビ外枠コンテナも折り返し可にする（ロゴ＋リンク列が縦積みになる）。
+    var navInner = cont.parentElement;
+    if (navInner) navInner.classList.add("flex-wrap", "gap-y-2");
   }
 
 
