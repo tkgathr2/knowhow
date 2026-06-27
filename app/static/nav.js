@@ -61,6 +61,10 @@
     Array.prototype.forEach.call(cont.children, function (el) {
       el.classList.add("shrink-0", "whitespace-nowrap");
     });
+
+    // モバイル対応：ナビ外枠コンテナも折り返し可にする（ロゴ＋リンク列が縦積みになる）。
+    var navInner = cont.parentElement;
+    if (navInner) navInner.classList.add("flex-wrap", "gap-y-2");
   }
 
 
