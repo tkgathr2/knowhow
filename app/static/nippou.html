@@ -91,6 +91,7 @@
     <span id="t-koutsu" class="tab" onclick="setDept('koutsu')">交通誘導</span>
     <span id="t-shikujiri" class="tab" onclick="setDept('shikujiri')">しくじり先生</span>
     <span id="t-cto-room-dev" class="tab" onclick="setDept('cto-room-dev')">開発</span>
+    <span id="t-zeus" class="tab" onclick="setDept('zeus')">⚡ Zeus</span>
   </div>
 
   <div class="flex flex-col lg:flex-row gap-5">
@@ -118,7 +119,7 @@ const API = window.location.origin;
 let dept = 'stepup';
 let reports = [];
 let selectedId = null;
-const DEPT_NAME={stepup:'ステップアップ事業部',soumu:'総務部',koutsu:'交通誘導事業部',shikujiri:'しくじり先生','cto-room-dev':'開発部'};
+const DEPT_NAME={stepup:'ステップアップ事業部',soumu:'総務部',koutsu:'交通誘導事業部',shikujiri:'しくじり先生','cto-room-dev':'開発部',zeus:'⚡ Zeus（AI最高顧問）'};
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function renderMd(md){
@@ -165,7 +166,7 @@ function highlight(root){
 
 function setDept(d){
   dept=d;
-  ['stepup','soumu','koutsu','shikujiri','cto-room-dev'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
+  ['stepup','soumu','koutsu','shikujiri','cto-room-dev','zeus'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===d));
   selectedId=null;
   load();
 }
@@ -319,9 +320,9 @@ let wantId=null;  // ?id= で索引ページから来たときに開く日報
 function initDeptFromUrl(){
   const sp=new URLSearchParams(window.location.search);
   const q=sp.get('dept');
-  if(q && ['stepup','soumu','koutsu','shikujiri','cto-room-dev'].includes(q)){
+  if(q && ['stepup','soumu','koutsu','shikujiri','cto-room-dev','zeus'].includes(q)){
     dept=q;
-    ['stepup','soumu','koutsu','shikujiri','cto-room-dev'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
+    ['stepup','soumu','koutsu','shikujiri','cto-room-dev','zeus'].forEach(k=>document.getElementById('t-'+k).classList.toggle('active',k===q));
   }
   const idp=parseInt(sp.get('id'),10);
   if(Number.isFinite(idp)) wantId=idp;
