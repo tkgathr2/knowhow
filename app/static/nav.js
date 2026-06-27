@@ -79,9 +79,18 @@
   }
 
 
-  // カイゼンくんウィジェット：全ページに表示（knowhow は認証後のみアクセス可）
+  // カイゼンくんウィジェット：全ページに表示（knowhow は認証後のみアクセス可）。
+  // ★ログイン情報を小窓へ引き継ぐ：小窓は別オリジン iframe で Google ログインが原理的に不可。
+  //   そこでホスト(knowhow)のログイン済みユーザー（/auth/me）を window.kaizenUser で渡し、
+  //   小窓は再ログイン不要で「誰が出した要望か」を分かった状態にする（取得不可なら手入力に退行）。
   (function() {
     if (document.querySelector('script[data-kaizen-knowhow]')) return;
+    try {
+      fetch('/auth/me', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d && d.user) window.kaizenUser = d.user; })
+        .catch(function () {});
+    } catch (e) { /* 取得不可でもウィジェットは出す */ }
     var s = document.createElement('script');
     s.src = 'https://kaizen.takagi.bz/widget.js';
     s.setAttribute('data-sys', 'knowhow');
