@@ -58,6 +58,14 @@ def _run_migrations() -> None:
         conn = psycopg2.connect(db_url)
         conn.autocommit = True
         with conn.cursor() as cur:
+            # 起動時マイグレーションが他セッションの保持ロックで無限待ちし、
+            # startup がハング→全断するのを防ぐ（2026-06-30 障害の恒久対策）。
+            # ロック獲得は最大15秒・1文は最大60秒で打ち切り、失敗文はスキップして起動を続行。
+            try:
+                cur.execute("SET lock_timeout = '15s'")
+                cur.execute("SET statement_timeout = '60s'")
+            except Exception as e:  # noqa: BLE001
+                _logger.warning("failed to set migration timeouts (ignored): %s", e)
             for mf in migration_files:
                 sql = mf.read_text(encoding="utf-8")
                 try:

@@ -149,8 +149,15 @@ async def _merge_duplicate_chunks(
         ORDER BY similarity DESC
         LIMIT :lim
     """)
+    # この検出SELECTは project 内で O(n²)（全ペア×pgvector距離）になりうる。データ増（6月で
+    # +2万件）に伴い、advisory lock を掴んだまま無限実行→夜間ラン全体を止める事故が起きた
+    # （2026-06-30）。検出SELECTのみ savepoint + statement_timeout で上限を設け、超過時は
+    # degrade-safe に 0 件で抜ける（decay/採点/digest は通常どおり継続し、run_date は前進する）。
+    # 根本（全ペア結合→近傍ANN検索への置換）は別途 cto-room-dev で対応。
     try:
-        rows = (await db.execute(q, {"threshold": threshold, "lim": max_pairs})).all()
+        async with db.begin_nested():
+            await db.execute(text("SET LOCAL statement_timeout = '45s'"))
+            rows = (await db.execute(q, {"threshold": threshold, "lim": max_pairs})).all()
     except Exception:
         return 0
 
