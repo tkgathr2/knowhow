@@ -42,7 +42,11 @@ class NightlyRunRequest(BaseModel):
     dedup_max_pairs: int = Field(default=50, ge=0, le=200)  # 重複統合: 1晩の上限ペア数（0=無効）
     # --- 近傍(KNN)方式の重複検出パラメータ（全ペア自己結合O(n²)を廃し近傍ANN検索へ） ---
     dedup_recent_days: int = Field(default=3, ge=1, le=365)  # 候補=直近この日数に作成されたchunkに限定
-    dedup_neighbors: int = Field(default=5, ge=1, le=50)     # 各候補について引く近傍件数(k)
+    # 各候補について HNSW で引く「グローバル近傍」件数。pgvector のHNSW索引は project_key 等の
+    # 等価フィルタを索引内で適用できず、内側で WHERE project_key=... を付けると索引を使えず seq scan に
+    # 退行する（本番実測 248s/1000候補）。そのため内側はフィルタ無しのグローバル近傍をK件引き、外側で
+    # 同一project・非deprecated に絞る。近接重複(sim≥0.95)はほぼ最近傍に来るためK=20で取りこぼさない。
+    dedup_neighbors: int = Field(default=20, ge=1, le=100)
     dedup_candidate_limit: int = Field(default=500, ge=1, le=5000)  # 1晩に走査する候補chunkの上限
     dry_run: bool = False
     # --- Phase S1: 採点パラメータ ---
@@ -169,14 +173,18 @@ async def _merge_duplicate_chunks(
     旧実装は project 内の全ペア自己結合×pgvector距離＝O(n²)で、データ増（6月で+2万件）に伴い
     advisory lock を掴んだまま無限実行→夜間ラン全体を止める事故（2026-06-30 本番全断）を招いた。
     本実装は「直近 recent_days 日に作成された候補chunkを最大 candidate_limit 件だけ走査し、各々
-    HNSW索引で近傍 neighbors 件を引く」LATERAL近傍検索に置換し、走査量を候補数×kに上限化する
-    （毎晩フルスキャンしない）。検出SELECTは savepoint + statement_timeout=45s で囲い、超過/索引欠落/
-    pgvector不在でも 0 件で抜ける安全網を残す。"""
+    HNSW索引でグローバル近傍 neighbors 件を引いて外側で同一project・非deprecated・しきい値に絞る」
+    LATERAL近傍検索に置換し、走査量を候補数×Kに上限化する（毎晩フルスキャンしない）。本番実測で
+    1000候補が約5秒（旧フィルタ内蔵版は索引が効かず248秒だった）。検出SELECTは savepoint +
+    statement_timeout=45s で囲い、超過/索引欠落/pgvector不在でも 0 件で抜ける安全網を残す。"""
     if max_pairs <= 0:
         return 0
     recent_cutoff = datetime.now(UTC) - timedelta(days=recent_days)
     # 生ペアは canonical 正準化で半減・重複排除されるため、max_pairs より多めに取得して取りこぼしを防ぐ。
     raw_limit = min(candidate_limit * neighbors, max_pairs * 8 + 200)
+    # 内側LATERALは「id<>self」のみで HNSW索引によるグローバル近傍をK件引く（project_key 等の
+    # フィルタを内側に入れると索引が効かず seq scan に退行＝O(n²)に逆戻りするため、必ず外側で絞る）。
+    # 外側で 同一project・非deprecated・類似度しきい値 に絞り、類似度降順で上限まで取る。
     q = text("""
         WITH cand AS (
             SELECT id, project_key, embedding, confidence_score
@@ -188,20 +196,20 @@ async def _merge_duplicate_chunks(
             LIMIT :cand_limit
         )
         SELECT a.id AS id_a, a.confidence_score AS conf_a,
-               nb.id AS id_b, nb.confidence_score AS conf_b,
+               nb.id AS id_b, nb.conf_b AS conf_b,
                1 - (a.embedding <=> nb.embedding) AS similarity
         FROM cand a
         CROSS JOIN LATERAL (
-            SELECT b.id, b.confidence_score, b.embedding
+            SELECT b.id, b.confidence_score AS conf_b, b.embedding,
+                   b.project_key, b.is_deprecated
             FROM kb_chunks b
-            WHERE b.project_key = a.project_key
-              AND b.id <> a.id
-              AND b.is_deprecated = false
-              AND b.embedding IS NOT NULL
+            WHERE b.id <> a.id
             ORDER BY b.embedding <=> a.embedding
             LIMIT :neighbors
         ) nb
-        WHERE (1 - (a.embedding <=> nb.embedding)) >= :threshold
+        WHERE nb.project_key = a.project_key
+          AND nb.is_deprecated = false
+          AND (1 - (a.embedding <=> nb.embedding)) >= :threshold
         ORDER BY similarity DESC
         LIMIT :raw_lim
     """)
