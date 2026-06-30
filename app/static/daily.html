@@ -46,11 +46,15 @@
 </nav>
 
 <div class="max-w-4xl mx-auto px-4 py-6">
-  <div class="flex items-center gap-2 mb-5">
+  <div class="flex flex-wrap items-center gap-2 mb-5">
     <span class="text-xs text-gray-400 mr-1">期間</span>
     <span id="d-7" class="seg" onclick="setDays(7)">7日</span>
     <span id="d-14" class="seg active" onclick="setDays(14)">14日</span>
     <span id="d-30" class="seg" onclick="setDays(30)">30日</span>
+    <span class="text-xs text-gray-400 ml-2 mr-1">部長</span>
+    <select id="bucho-sel" onchange="setBucho(this.value)" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-indigo-400">
+      <option value="">全部長</option>
+    </select>
     <span id="since" class="text-xs text-gray-400 ml-2"></span>
   </div>
   <div id="headline" class="hidden mb-5"></div>
@@ -63,10 +67,25 @@
 <script>
 const API = window.location.origin;
 let days = 14;
+let bucho = '';
 let digests = {};  // date -> {headline, body, is_final}
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 async function api(p){try{const r=await fetch(API+p);if(!r.ok)return null;return await r.json();}catch{return null;}}
+
+async function initBuchoSel(){
+  const d=await api('/api/stats/bucho?days=30');
+  const sel=document.getElementById('bucho-sel');
+  if(!d||!d.buchos)return;
+  d.buchos.forEach(b=>{
+    const o=document.createElement('option');
+    o.value=b.key;
+    o.textContent=b.emoji+' '+b.name;
+    sel.appendChild(o);
+  });
+}
+
+function setBucho(b){bucho=b;load();}
 
 const TAGCOLORS=['bg-blue-100 text-blue-700','bg-green-100 text-green-700','bg-purple-100 text-purple-700','bg-orange-100 text-orange-700','bg-pink-100 text-pink-700','bg-teal-100 text-teal-700','bg-yellow-100 text-yellow-700','bg-red-100 text-red-700','bg-indigo-100 text-indigo-700'];
 function tagColor(t){let h=0;for(let i=0;i<t.length;i++)h=((h<<5)-h+t.charCodeAt(i))|0;return TAGCOLORS[Math.abs(h)%TAGCOLORS.length];}
@@ -94,6 +113,7 @@ function dateLabel(d){
 }
 
 function setDays(n){days=n;[7,14,30].forEach(k=>document.getElementById('d-'+k).classList.toggle('active',k===n));load();}
+
 
 function itemCard(it){
   const conf = it.confidence!=null ? `<span class="text-xs text-gray-400">信頼度 ${it.confidence}%</span>` : '';
@@ -220,8 +240,10 @@ async function load(){
   const my=++loadToken;
   itemsLoaded=false;
   tl.innerHTML='<p class="text-sm text-gray-400">読み込み中…</p>';
+  const buchoParam=bucho?`&bucho=${encodeURIComponent(bucho)}`:'';
+  if(bucho)digests={};
   // ① まず数字・チップだけ即表示（light=1＝重い本文取得を省くので速い）
-  const d=await api('/api/growth/daily?days='+days+'&light=1');
+  const d=await api('/api/growth/daily?days='+days+'&light=1'+buchoParam);
   if(my!==loadToken)return;  // 期間が切り替わっていたら破棄
   if(!d){tl.innerHTML='<p class="text-sm text-gray-400">読み込みに失敗しました</p>';return;}
   document.getElementById('since').textContent=d.since+' 〜';
@@ -231,7 +253,7 @@ async function load(){
   lastEntries=d.entries;
   renderTimeline();
   // ② 中身（テーマタグ＋「1件ずつ見る」）を後追いで差し込む
-  api('/api/growth/daily?days='+days).then(full=>{
+  api('/api/growth/daily?days='+days+buchoParam).then(full=>{
     if(my!==loadToken)return;
     if(full&&full.entries&&full.entries.length){
       lastEntries=full.entries;
@@ -239,17 +261,20 @@ async function load(){
       renderTimeline();
     }
   });
-  // ③ まとめ（黄色い枠）も後から差し込む
-  api('/api/digest/daily?days='+days).then(dg=>{
-    if(my!==loadToken)return;
-    if(dg&&dg.entries){
-      digests={};
-      dg.entries.forEach(x=>{digests[x.date]=x;});
-      renderTimeline();
-    }
-  });
+  // ③ まとめ（黄色い枠）も後から差し込む（部長フィルタ時はダイジェストなし）
+  if(!bucho){
+    api('/api/digest/daily?days='+days).then(dg=>{
+      if(my!==loadToken)return;
+      if(dg&&dg.entries){
+        digests={};
+        dg.entries.forEach(x=>{digests[x.date]=x;});
+        renderTimeline();
+      }
+    });
+  }
 }
 
+initBuchoSel();
 load();
 </script>
 <script src="/static/nippou-tabs.js"></script>

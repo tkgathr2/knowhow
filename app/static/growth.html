@@ -67,6 +67,12 @@
       <span id="b-month" class="seg active" onclick="setBucket('month')">月次</span>
       <span id="b-week" class="seg" onclick="setBucket('week')">週次</span>
     </div>
+    <div class="flex items-center gap-1">
+      <span class="text-xs text-gray-400 mr-1">部長</span>
+      <select id="bucho-sel" onchange="setBucho(this.value)" class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-indigo-400">
+        <option value="">全部長</option>
+      </select>
+    </div>
     <span class="text-xs text-gray-400">基準: <span id="baseline">-</span></span>
   </div>
 
@@ -132,6 +138,7 @@
 const API = window.location.origin;
 let series = 'all';
 let bucket = 'month';
+let bucho = '';
 let cumChart, momChart, depChart, costChart;
 
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
@@ -142,6 +149,19 @@ async function api(path){try{const r=await fetch(API+path);if(!r.ok)return null;
 
 function setSeries(s){series=s;['all','asset','log'].forEach(k=>document.getElementById('s-'+k).classList.toggle('active',k===s));load();}
 function setBucket(b){bucket=b;['month','week'].forEach(k=>document.getElementById('b-'+k).classList.toggle('active',k===b));load();}
+function setBucho(b){bucho=b;load();}
+
+async function initBuchoSel(){
+  const d=await api('/api/stats/bucho?days=30');
+  const sel=document.getElementById('bucho-sel');
+  if(!d||!d.buchos)return;
+  d.buchos.forEach(b=>{
+    const o=document.createElement('option');
+    o.value=b.key;
+    o.textContent=b.emoji+' '+b.name;
+    sel.appendChild(o);
+  });
+}
 
 function card(label,value,sub,subClass){
   return `<div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 fade-in">
@@ -316,7 +336,8 @@ async function loadUsage(){
 
 async function load(){
   loadAuth();
-  const d=await api(`/api/stats/growth?bucket=${bucket}&series=${series}`);
+  const buchoParam=bucho?`&bucho=${encodeURIComponent(bucho)}`:'';
+  const d=await api(`/api/stats/growth?bucket=${bucket}&series=${series}${buchoParam}`);
   if(!d){document.getElementById('narrative').textContent='データの取得に失敗しました。';return;}
   document.getElementById('narrative').textContent=d.narrative;
   document.getElementById('baseline').textContent=d.baseline_period||'-';
@@ -325,11 +346,12 @@ async function load(){
   renderMom(d);
   renderSrc(d);
   renderDep(d);
-  loadBucho();
+  if(!bucho){loadBucho();}
   loadUsage();
   loadCost();
 }
 
+initBuchoSel();
 load();
 </script>
 <script src="/static/nav.js"></script>
