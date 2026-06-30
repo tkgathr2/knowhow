@@ -40,6 +40,10 @@ class NightlyRunRequest(BaseModel):
     recurrence_window_days: int = Field(default=1, ge=1, le=30)  # 再発判定の対象期間
     dedup_threshold: float = Field(default=0.95, ge=0.8, le=1)  # 重複統合: 類似度しきい値
     dedup_max_pairs: int = Field(default=50, ge=0, le=200)  # 重複統合: 1晩の上限ペア数（0=無効）
+    # --- 近傍(KNN)方式の重複検出パラメータ（全ペア自己結合O(n²)を廃し近傍ANN検索へ） ---
+    dedup_recent_days: int = Field(default=3, ge=1, le=365)  # 候補=直近この日数に作成されたchunkに限定
+    dedup_neighbors: int = Field(default=5, ge=1, le=50)     # 各候補について引く近傍件数(k)
+    dedup_candidate_limit: int = Field(default=500, ge=1, le=5000)  # 1晩に走査する候補chunkの上限
     dry_run: bool = False
     # --- Phase S1: 採点パラメータ ---
     score_window_hours: int = Field(default=6, ge=1, le=48)  # recall後この時間以内のセッションを対象
@@ -123,51 +127,121 @@ def merge_stats(
     return alpha, beta, alpha / (alpha + beta)
 
 
+def select_merge_pairs(
+    raw_pairs: "list[tuple[int, float, int, float, float]]", max_pairs: int
+) -> "list[tuple[int, float, int, float, float]]":
+    """近傍検索の生ペア (id_a, conf_a, id_b, conf_b, similarity) を統合候補へ整形する純関数。
+    - 自己ペア(id_a==id_b)を除外
+    - (a→b) と (b→a) を canonical(小さいid側を id_a) へ正準化して重複排除（最大類似度を採用）
+    - 類似度の降順に並べ、max_pairs 件で打ち切る
+    DB非依存・決定的（同点は id_a, id_b で安定ソート）。"""
+    best: dict[tuple[int, int], tuple[int, float, int, float, float]] = {}
+    for id_a, conf_a, id_b, conf_b, sim in raw_pairs:
+        if id_a == id_b:
+            continue
+        sim = float(sim)
+        if id_a < id_b:
+            key = (id_a, id_b)
+            tup = (id_a, conf_a, id_b, conf_b, sim)
+        else:
+            key = (id_b, id_a)
+            tup = (id_b, conf_b, id_a, conf_a, sim)
+        prev = best.get(key)
+        if prev is None or sim > prev[4]:
+            best[key] = tup
+    ordered = sorted(best.values(), key=lambda t: (-t[4], t[0], t[2]))
+    return ordered[: max(0, max_pairs)]
+
+
 async def _merge_duplicate_chunks(
-    db: AsyncSession, threshold: float, max_pairs: int, dry_run: bool
+    db: AsyncSession,
+    threshold: float,
+    max_pairs: int,
+    dry_run: bool,
+    recent_days: int = 3,
+    neighbors: int = 5,
+    candidate_limit: int = 500,
 ) -> int:
-    """夜間の重複統合: 同一project内の類似度>=threshold のペアを統合（残す側へ実績を合算、
-    片方を非推奨化）。auto-ingest が同時多発で作る近接重複の掃除。embedding 無しや
-    pgvector 不在の環境では安全に0件で返す（degrade-safe）。"""
+    """夜間の重複統合: 近傍(KNN)検索で同一project内の類似度>=threshold のペアを統合（残す側へ
+    実績を合算、片方を非推奨化）。auto-ingest が同時多発で作る近接重複の掃除。embedding 無しや
+    pgvector 不在の環境では安全に0件で返す（degrade-safe）。
+
+    旧実装は project 内の全ペア自己結合×pgvector距離＝O(n²)で、データ増（6月で+2万件）に伴い
+    advisory lock を掴んだまま無限実行→夜間ラン全体を止める事故（2026-06-30 本番全断）を招いた。
+    本実装は「直近 recent_days 日に作成された候補chunkを最大 candidate_limit 件だけ走査し、各々
+    HNSW索引で近傍 neighbors 件を引く」LATERAL近傍検索に置換し、走査量を候補数×kに上限化する
+    （毎晩フルスキャンしない）。検出SELECTは savepoint + statement_timeout=45s で囲い、超過/索引欠落/
+    pgvector不在でも 0 件で抜ける安全網を残す。"""
     if max_pairs <= 0:
         return 0
+    recent_cutoff = datetime.now(UTC) - timedelta(days=recent_days)
+    # 生ペアは canonical 正準化で半減・重複排除されるため、max_pairs より多めに取得して取りこぼしを防ぐ。
+    raw_limit = min(candidate_limit * neighbors, max_pairs * 8 + 200)
     q = text("""
-        SELECT id_a, id_b, conf_a, conf_b
-        FROM (
-            SELECT a.id AS id_a, b.id AS id_b,
-                   a.confidence_score AS conf_a, b.confidence_score AS conf_b,
-                   1 - (a.embedding <=> b.embedding) AS similarity
-            FROM kb_chunks a
-            JOIN kb_chunks b ON a.id < b.id
-                 AND a.project_key = b.project_key
-            WHERE a.embedding IS NOT NULL
-                  AND b.embedding IS NOT NULL
-                  AND a.is_deprecated = false
-                  AND b.is_deprecated = false
-        ) sub
-        WHERE similarity >= :threshold
+        WITH cand AS (
+            SELECT id, project_key, embedding, confidence_score
+            FROM kb_chunks
+            WHERE is_deprecated = false
+              AND embedding IS NOT NULL
+              AND created_at >= :recent_cutoff
+            ORDER BY created_at DESC
+            LIMIT :cand_limit
+        )
+        SELECT a.id AS id_a, a.confidence_score AS conf_a,
+               nb.id AS id_b, nb.confidence_score AS conf_b,
+               1 - (a.embedding <=> nb.embedding) AS similarity
+        FROM cand a
+        CROSS JOIN LATERAL (
+            SELECT b.id, b.confidence_score, b.embedding
+            FROM kb_chunks b
+            WHERE b.project_key = a.project_key
+              AND b.id <> a.id
+              AND b.is_deprecated = false
+              AND b.embedding IS NOT NULL
+            ORDER BY b.embedding <=> a.embedding
+            LIMIT :neighbors
+        ) nb
+        WHERE (1 - (a.embedding <=> nb.embedding)) >= :threshold
         ORDER BY similarity DESC
-        LIMIT :lim
+        LIMIT :raw_lim
     """)
-    # この検出SELECTは project 内で O(n²)（全ペア×pgvector距離）になりうる。データ増（6月で
-    # +2万件）に伴い、advisory lock を掴んだまま無限実行→夜間ラン全体を止める事故が起きた
-    # （2026-06-30）。検出SELECTのみ savepoint + statement_timeout で上限を設け、超過時は
-    # degrade-safe に 0 件で抜ける（decay/採点/digest は通常どおり継続し、run_date は前進する）。
-    # 根本（全ペア結合→近傍ANN検索への置換）は別途 cto-room-dev で対応。
-    try:
+    params = {
+        "recent_cutoff": recent_cutoff,
+        "cand_limit": candidate_limit,
+        "neighbors": neighbors,
+        "threshold": threshold,
+        "raw_lim": raw_limit,
+    }
+
+    async def _detect(use_ef_search: bool) -> list:
         async with db.begin_nested():
             await db.execute(text("SET LOCAL statement_timeout = '45s'"))
-            rows = (await db.execute(q, {"threshold": threshold, "lim": max_pairs})).all()
+            if use_ef_search:
+                # 近傍の取りこぼし（project_key フィルタ下の filtered HNSW）を抑える。GUC未対応の
+                # 古い pgvector では失敗しうるため、失敗時は ef_search 無しで再試行（下の except）。
+                await db.execute(text("SET LOCAL hnsw.ef_search = 100"))
+            return (await db.execute(q, params)).all()
+
+    try:
+        rows = await _detect(True)
     except Exception:
-        return 0
+        try:
+            rows = await _detect(False)
+        except Exception:
+            return 0
+
+    pairs = select_merge_pairs(
+        [(r.id_a, r.conf_a, r.id_b, r.conf_b, r.similarity) for r in rows],
+        max_pairs,
+    )
 
     merged = 0
     deprecated: set[int] = set()
-    for row in rows:
+    for id_a, conf_a, id_b, conf_b, _sim in pairs:
         # 連鎖ペア(a-b, b-c)対策: このパスで既に消した側が絡むペアはスキップ
-        if row.id_a in deprecated or row.id_b in deprecated:
+        if id_a in deprecated or id_b in deprecated:
             continue
-        keep_id, remove_id = pick_keeper(row.id_a, row.conf_a, row.id_b, row.conf_b)
+        keep_id, remove_id = pick_keeper(id_a, conf_a, id_b, conf_b)
         if dry_run:
             deprecated.add(remove_id)
             merged += 1
@@ -506,7 +580,15 @@ async def nightly_run(req: NightlyRunRequest, db: AsyncSession = Depends(get_db)
         )
         # 重複統合も decay と同じ「現在状態」操作＝今日分の処理時のみ・1日1回（backfillでは実行しない）
         merged_total = (
-            await _merge_duplicate_chunks(db, req.dedup_threshold, req.dedup_max_pairs, req.dry_run)
+            await _merge_duplicate_chunks(
+                db,
+                req.dedup_threshold,
+                req.dedup_max_pairs,
+                req.dry_run,
+                req.dedup_recent_days,
+                req.dedup_neighbors,
+                req.dedup_candidate_limit,
+            )
             if do_decay
             else 0
         )
