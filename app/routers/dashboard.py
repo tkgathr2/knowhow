@@ -422,18 +422,133 @@ async def get_growth(
     bucket: str = "month",
     series: str = "all",
     project_key: str | None = None,
+    bucho: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> GrowthResponse:
     if bucket not in ("month", "week"):
         bucket = "month"
     if series not in ("asset", "log", "all"):
         series = "all"
+    if bucho is not None and bucho_calc.bucho_def(bucho) is None:
+        bucho = None
 
     trunc_unit = "week" if bucket == "week" else "month"
     label_fmt = 'IYYY-"W"IW' if bucket == "week" else "YYYY-MM"
     period_expr = func.to_char(
         func.date_trunc(trunc_unit, KbChunk.created_at), label_fmt
     )
+
+    if bucho is not None:
+        all_rows = await db.execute(
+            select(
+                KbChunk.project_key,
+                KbChunk.tags,
+                KbChunk.content,
+                KbChunk.source_type,
+                KbChunk.is_deprecated,
+                KbChunk.embedding,
+                KbChunk.confidence_score,
+                KbChunk.helpful_count,
+                KbChunk.unhelpful_count,
+                KbChunk.recall_count,
+                period_expr.label("period"),
+            )
+        )
+        is_asset_list = []
+        is_log_list = []
+        is_dep_list = []
+        is_emb_list = []
+        conf_asset_list = []
+        helpful_total = 0
+        unhelpful_total = 0
+        recall_total = 0
+        recalled_chunks = 0
+        project_keys_seen: set[str] = set()
+        added_series_by_period: dict[str, int] = {}
+        dep_series_by_period: dict[str, int] = {}
+        src_counter: dict[str, int] = {}
+        for r in all_rows:
+            bkey = bucho_calc.classify(
+                r.project_key or "", r.tags or [], (r.content or "")[:200]
+            )
+            if bkey != bucho:
+                continue
+            is_asset = r.source_type != _LOG_SOURCE
+            is_log = r.source_type == _LOG_SOURCE
+            is_dep = bool(r.is_deprecated)
+            is_emb = r.embedding is not None
+            is_asset_list.append(is_asset)
+            is_log_list.append(is_log)
+            is_dep_list.append(is_dep)
+            is_emb_list.append(is_emb)
+            if is_asset and r.confidence_score is not None:
+                conf_asset_list.append(float(r.confidence_score))
+            helpful_total += r.helpful_count or 0
+            unhelpful_total += r.unhelpful_count or 0
+            rc = r.recall_count or 0
+            recall_total += rc
+            if rc > 0:
+                recalled_chunks += 1
+            project_keys_seen.add(r.project_key or "")
+            src_counter[r.source_type or ""] = src_counter.get(r.source_type or "", 0) + 1
+            period = r.period
+            if not period:
+                continue
+            in_series = (
+                (series == "all")
+                or (series == "asset" and is_asset)
+                or (series == "log" and is_log)
+            )
+            if in_series:
+                added_series_by_period[period] = added_series_by_period.get(period, 0) + 1
+                if is_dep:
+                    dep_series_by_period[period] = dep_series_by_period.get(period, 0) + 1
+
+        t_chunks = len(is_asset_list)
+        t_asset = sum(1 for v in is_asset_list if v)
+        t_log = sum(1 for v in is_log_list if v)
+        t_deprecated = sum(1 for v in is_dep_list if v)
+        t_embedded = sum(1 for v in is_emb_list if v)
+        t_avg_conf = (sum(conf_asset_list) / len(conf_asset_list)) if conf_asset_list else None
+        t_projects = len(project_keys_seen)
+
+        points = growth_calc.build_points(added_series_by_period, dep_series_by_period)
+        now = datetime.now(timezone.utc)
+        current = growth_calc.project_current(points, now, bucket)
+        narrative = growth_calc.make_narrative(points, current, series)
+        baseline_period = points[0]["period"] if points else None
+
+        totals = GrowthTotals(
+            chunks=t_chunks,
+            asset=t_asset,
+            log=t_log,
+            deprecated=t_deprecated,
+            embedded=t_embedded,
+            vectorized_pct=growth_calc.vectorized_pct(t_embedded, t_chunks),
+            avg_confidence=(
+                round(t_avg_conf * 100, 1) if t_avg_conf is not None else None
+            ),
+            helpful_rate=growth_calc.helpful_rate(helpful_total, unhelpful_total),
+            recall_total=recall_total,
+            recalled_chunks=recalled_chunks,
+            projects=t_projects,
+        )
+
+        by_source_type = [
+            SourceTypeStat(source_type=k, count=v)
+            for k, v in sorted(src_counter.items(), key=lambda x: -x[1])
+        ]
+
+        return GrowthResponse(
+            bucket=bucket,
+            series=series,
+            baseline_period=baseline_period,
+            narrative=narrative,
+            points=[GrowthPoint(**p) for p in points],
+            current_period=GrowthCurrent(**current) if current else None,
+            totals=totals,
+            by_source_type=by_source_type,
+        )
 
     base_where = []
     if project_key:
@@ -587,6 +702,7 @@ def _day_expr(col):
 async def get_growth_daily(
     days: int = 14,
     project_key: str | None = None,
+    bucho: str | None = None,
     light: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> DailyResponse:
@@ -595,6 +711,105 @@ async def get_growth_daily(
     days = max(1, min(days, 60))
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
+    if bucho is not None and bucho_calc.bucho_def(bucho) is None:
+        bucho = None
+
+    if bucho is not None:
+        all_rows = await db.execute(
+            select(
+                KbChunk.id,
+                KbChunk.project_key,
+                KbChunk.chunk_type,
+                KbChunk.source_type,
+                KbChunk.content,
+                KbChunk.tags,
+                KbChunk.confidence_score,
+                KbChunk.recall_count,
+                KbChunk.is_deprecated,
+                KbChunk.created_at,
+                KbChunk.last_recalled_at,
+                _day_expr(KbChunk.created_at).label("d"),
+            )
+        )
+        asset_by_day: dict[str, int] = {}
+        log_by_day: dict[str, int] = {}
+        dep_by_day: dict[str, int] = {}
+        recalled_by_day: dict[str, int] = {}
+        base_before = 0
+        items_by_day: dict[str, list[DailyItem]] = {}
+        for r in all_rows:
+            bkey = bucho_calc.classify(
+                r.project_key or "", r.tags or [], (r.content or "")[:200]
+            )
+            if bkey != bucho:
+                continue
+            is_asset = r.source_type != _LOG_SOURCE
+            day = r.d
+            created_at = r.created_at
+            if created_at and created_at < since:
+                if is_asset:
+                    base_before += 1
+                continue
+            if not day:
+                continue
+            is_dep = bool(r.is_deprecated)
+            if is_asset:
+                asset_by_day[day] = asset_by_day.get(day, 0) + 1
+                if is_dep:
+                    dep_by_day[day] = dep_by_day.get(day, 0) + 1
+                if not light:
+                    preview = (r.content or "")[:160]
+                    if len(r.content or "") > 160:
+                        preview += "…"
+                    items_by_day.setdefault(day, []).append(
+                        DailyItem(
+                            chunk_id=r.id,
+                            project_key=r.project_key,
+                            chunk_type=r.chunk_type,
+                            source_type=r.source_type,
+                            preview=preview,
+                            tags=r.tags or [],
+                            confidence=round(float(r.confidence_score) * 100, 1),
+                            recall_count=r.recall_count,
+                            is_deprecated=r.is_deprecated,
+                            created_at=r.created_at,
+                        )
+                    )
+            else:
+                log_by_day[day] = log_by_day.get(day, 0) + 1
+            lra = r.last_recalled_at
+            if lra and lra >= since:
+                lra_day = lra.strftime("%Y-%m-%d")
+                recalled_by_day[lra_day] = recalled_by_day.get(lra_day, 0) + 1
+
+        days_desc = growth_calc.daily_keys(
+            asset_by_day, log_by_day, dep_by_day, recalled_by_day, items_by_day
+        )
+        entries_raw = growth_calc.assemble_daily(
+            days_desc, asset_by_day, log_by_day, dep_by_day, recalled_by_day, items_by_day
+        )
+        entries_raw = growth_calc.attach_daily_growth(entries_raw, base_before)
+        latest_raw = growth_calc.latest_daily_growth(entries_raw)
+        entries = [
+            DailyEntry(
+                date=e["date"],
+                asset_added=e["asset_added"],
+                log_added=e["log_added"],
+                deprecated=e["deprecated"],
+                recalled=e["recalled"],
+                asset_cumulative=e["asset_cumulative"],
+                growth_pct=e["growth_pct"],
+                items=e["items"],
+                items_truncated=e["items_truncated"],
+            )
+            for e in entries_raw
+        ]
+        return DailyResponse(
+            days=days,
+            since=since.strftime("%Y-%m-%d"),
+            latest=DailyLatest(**latest_raw) if latest_raw else None,
+            entries=entries,
+        )
 
     where = [KbChunk.created_at >= since]
     if project_key:
@@ -642,10 +857,10 @@ async def get_growth_daily(
         params["pk"] = project_key
     bundle = await db.execute(bundle_sql, params)
 
-    asset_by_day: dict[str, int] = {}
-    log_by_day: dict[str, int] = {}
-    dep_by_day: dict[str, int] = {}
-    recalled_by_day: dict[str, int] = {}
+    asset_by_day = {}
+    log_by_day = {}
+    dep_by_day = {}
+    recalled_by_day = {}
     base_before = 0
     for row in bundle:
         if row.kind == "win":
@@ -666,7 +881,7 @@ async def get_growth_daily(
     # その日に増えた「正味のナレッジ資産」の中身（新しい順）。
     # ここが最重）— 最大600行の本文(content)取得で、並行トラフィック時に
     # キャッシュが落ちると数百ms〜1秒超かかる。light では丸ごと省いて即返す。
-    items_by_day: dict[str, list[DailyItem]] = {}
+    items_by_day = {}
     if not light:
         item_rows = await db.execute(
             select(
