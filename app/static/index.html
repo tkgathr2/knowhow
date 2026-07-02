@@ -92,7 +92,9 @@
     <div class="lg:w-1/3 space-y-6">
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 class="font-semibold text-sm text-gray-700">プロジェクト一覧</h2>
+          <button id="project-list-toggle" onclick="toggleProjectList()" class="font-semibold text-sm text-gray-700 flex items-center gap-1 hover:text-indigo-600 focus:outline-none" aria-expanded="true" aria-controls="project-list">
+            <span id="project-list-toggle-icon">▾</span>プロジェクト一覧
+          </button>
           <span id="project-count" class="text-xs text-gray-400"></span>
         </div>
         <div id="project-list" class="divide-y divide-gray-50 max-h-96 overflow-y-auto"></div>
@@ -546,6 +548,16 @@ async function loadBriefing(){
     const who=s.who?` <span class="text-gray-400">〔${esc(s.who)}〕</span>`:'';
     return `<div class="flex items-center gap-2 text-sm"><span class="shrink-0">${m.e}</span><span class="text-[11px] font-bold px-1.5 py-0.5 rounded bg-white border border-gray-200 text-gray-500 shrink-0">${s.importance}</span><span class="text-gray-800 truncate">${esc(s.title)}${who}</span></div>`;
   }).join('')+(b.total>rows.length?`<a href="/lore" class="block text-xs text-indigo-500 underline pt-1">ほか${b.total-rows.length}件をロアで見る →</a>`:'');
+}
+
+function toggleProjectList() {
+  const list = document.getElementById('project-list');
+  const icon = document.getElementById('project-list-toggle-icon');
+  const btn = document.getElementById('project-list-toggle');
+  const hidden = list.style.display === 'none';
+  list.style.display = hidden ? '' : 'none';
+  icon.textContent = hidden ? '▾' : '▸';
+  btn.setAttribute('aria-expanded', hidden ? 'true' : 'false');
 }
 
 function loadAll() {
