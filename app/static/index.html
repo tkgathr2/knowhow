@@ -93,7 +93,10 @@
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
           <h2 class="font-semibold text-sm text-gray-700">プロジェクト一覧</h2>
-          <span id="project-count" class="text-xs text-gray-400"></span>
+          <div class="flex items-center gap-2">
+            <span id="project-count" class="text-xs text-gray-400"></span>
+            <button id="toggle-project-list" onclick="toggleProjectList()" class="text-xs text-indigo-600 hover:text-indigo-800">非表示</button>
+          </div>
         </div>
         <div id="project-list" class="divide-y divide-gray-50 max-h-96 overflow-y-auto"></div>
       </div>
@@ -548,6 +551,22 @@ async function loadBriefing(){
   }).join('')+(b.total>rows.length?`<a href="/lore" class="block text-xs text-indigo-500 underline pt-1">ほか${b.total-rows.length}件をロアで見る →</a>`:'');
 }
 
+function toggleProjectList() {
+  const list = document.getElementById('project-list');
+  const btn = document.getElementById('toggle-project-list');
+  const hidden = !list.classList.contains('hidden');
+  list.classList.toggle('hidden', hidden);
+  btn.textContent = hidden ? '表示' : '非表示';
+  localStorage.setItem('projectListHidden', hidden ? '1' : '0');
+}
+
+function applyProjectListVisibility() {
+  if (localStorage.getItem('projectListHidden') === '1') {
+    document.getElementById('project-list').classList.add('hidden');
+    document.getElementById('toggle-project-list').textContent = '表示';
+  }
+}
+
 function loadAll() {
   loadAuth();
   checkHealth();
@@ -558,6 +577,7 @@ function loadAll() {
   loadTags();
 }
 
+applyProjectListVisibility();
 loadAll();
 </script>
 <script src="/static/nav.js"></script>
