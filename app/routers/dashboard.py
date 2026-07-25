@@ -292,7 +292,7 @@ async def cross_project_search(
 
     query_embedding = None
     try:
-        query_embedding = await create_embedding(req.query)
+        query_embedding = await create_embedding(req.query, task="query")
     except Exception:
         pass
 

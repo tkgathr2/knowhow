@@ -70,7 +70,7 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
 
     query_embedding = None
     try:
-        query_embedding = await create_embedding(req.query)
+        query_embedding = await create_embedding(req.query, task="query")
     except Exception:
         query_embedding = None
 
@@ -226,7 +226,7 @@ async def search_hybrid(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
 
     query_embedding = None
     try:
-        query_embedding = await create_embedding(req.query)
+        query_embedding = await create_embedding(req.query, task="query")
     except Exception:
         query_embedding = None
 

@@ -94,7 +94,7 @@ async def recall(
 
     query_embedding = None
     try:
-        query_embedding = await create_embedding(req.query)
+        query_embedding = await create_embedding(req.query, task="query")
     except Exception:
         query_embedding = None
 

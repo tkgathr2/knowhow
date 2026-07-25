@@ -1,4 +1,8 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+GOOGLE_EMBEDDING_MODEL = "gemini-embedding-001"
+_OPENAI_EMBEDDING_MODEL = "text-embedding-3-large"
 
 
 class Settings(BaseSettings):
@@ -7,8 +11,13 @@ class Settings(BaseSettings):
     kb_api_key: str = ""
     # HO-83 管理import専用キー（KB_API_KEY とは別系統）。未設定なら /api/admin/* は 503。
     admin_import_key: str = ""
-    embedding_model: str = "text-embedding-3-large"
+    embedding_model: str = _OPENAI_EMBEDDING_MODEL
     embedding_dim: int = 1536
+    # --- embedding プロバイダ（2026-07-25 Google無料枠へ移行・残高切れ事故の構造的排除）---
+    # "google" | "openai" | "" = 自動（Googleキーがあれば google、なければ openai）。
+    # ロールバックは EMBEDDING_PROVIDER=openai を設定するだけ。
+    embedding_provider: str = ""
+    google_generative_ai_api_key: str = ""
     github_webhook_secret: str = ""
 
     # --- Google ログイン（ブラウザ向け・6か月セッション）---
@@ -26,6 +35,26 @@ class Settings(BaseSettings):
     session_max_age_days: int = 180
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @property
+    def active_embedding_provider(self) -> str:
+        """"google" | "openai" | "none"。明示指定が最優先、無指定はキーの有無で自動解決。"""
+        if self.embedding_provider in ("google", "openai"):
+            return self.embedding_provider
+        if self.google_generative_ai_api_key:
+            return "google"
+        if self.openai_api_key:
+            return "openai"
+        return "none"
+
+    @model_validator(mode="after")
+    def _resolve_embedding_model(self):
+        # provider=google なのに embedding_model が OpenAI 既定値のままなら Gemini に解決する。
+        # これにより ingest 各所の「settings.embedding_model を行にスタンプする」既存コードが
+        # 無修正で正しいモデル名を記録する（EMBEDDING_MODEL を明示した場合はそれを尊重）。
+        if self.active_embedding_provider == "google" and self.embedding_model == _OPENAI_EMBEDDING_MODEL:
+            self.embedding_model = GOOGLE_EMBEDDING_MODEL
+        return self
 
 
 settings = Settings()

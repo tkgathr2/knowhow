@@ -421,3 +421,137 @@ def _as_list(v) -> list[str]:
     if isinstance(v, list):
         return [str(x) for x in v if x not in (None, "")]
     return [str(v)]
+
+
+# ---------------------------------------------------------------------------
+# embedding 復旧・移行（2026-07-25 Google Gemini 移行 / OpenAI残高切れ事故の復旧）
+# ---------------------------------------------------------------------------
+
+
+class ReembedResponse(BaseModel):
+    model: str
+    processed: int
+    succeeded: int
+    failed: int
+    remaining: int
+    sessions_repaired: int
+    dry_run: bool
+
+
+@router.get("/admin/embedding-status", dependencies=[Depends(require_admin_key)])
+async def embedding_status(db: AsyncSession = Depends(get_db)) -> dict:
+    """embedding の健全性集計。missing=0 かつ stale=0 が完全復旧の証拠。"""
+    row = (
+        await db.execute(
+            text(
+                "SELECT count(*) AS total,"
+                " count(*) FILTER (WHERE embedding IS NULL) AS missing,"
+                " count(*) FILTER (WHERE embedding IS NOT NULL AND embedding_model <> :m) AS stale"
+                " FROM kb_chunks WHERE coalesce(content, '') <> ''"
+            ).bindparams(m=settings.embedding_model)
+        )
+    ).one()
+    by_model = (
+        await db.execute(
+            text(
+                "SELECT embedding_model, count(*) FROM kb_chunks"
+                " WHERE embedding IS NOT NULL GROUP BY embedding_model"
+            )
+        )
+    ).all()
+    return {
+        "provider": settings.active_embedding_provider,
+        "current_model": settings.embedding_model,
+        "total": row.total,
+        "missing": row.missing,
+        "stale": row.stale,
+        "by_model": {m: c for m, c in by_model},
+    }
+
+
+@router.post(
+    "/admin/reembed", response_model=ReembedResponse, dependencies=[Depends(require_admin_key)]
+)
+async def admin_reembed(
+    limit: int = 100, dry_run: bool = False, db: AsyncSession = Depends(get_db)
+) -> ReembedResponse:
+    """embedding が NULL または旧モデルのチャンクを現行モデルで再生成する。
+
+    冪等・再開可能：処理済み（現行モデルで embedding あり）は対象から自然に外れるため、
+    remaining が 0 になるまで繰り返し呼ぶだけでよい。失敗分は次回呼び出しで再試行される。
+    無料枠のレート制御は embedding 層（batchEmbedContents + バックオフ）が担う。
+    """
+    from app.embedding import create_embeddings_batch
+
+    limit = max(1, min(limit, 500))
+    rows = (
+        await db.execute(
+            text(
+                "SELECT id, content FROM kb_chunks"
+                " WHERE coalesce(content, '') <> ''"
+                " AND (embedding IS NULL OR embedding_model <> :m)"
+                " ORDER BY id LIMIT :lim"
+            ).bindparams(m=settings.embedding_model, lim=limit)
+        )
+    ).all()
+
+    remaining_row = (
+        await db.execute(
+            text(
+                "SELECT count(*) FROM kb_chunks"
+                " WHERE coalesce(content, '') <> ''"
+                " AND (embedding IS NULL OR embedding_model <> :m)"
+            ).bindparams(m=settings.embedding_model)
+        )
+    ).scalar_one()
+
+    if dry_run or not rows:
+        return ReembedResponse(
+            model=settings.embedding_model,
+            processed=0,
+            succeeded=0,
+            failed=0,
+            remaining=remaining_row,
+            sessions_repaired=0,
+            dry_run=dry_run,
+        )
+
+    embeddings = await create_embeddings_batch([r.content for r in rows])
+    succeeded = 0
+    failed = 0
+    for row, emb in zip(rows, embeddings):
+        if emb is None:
+            failed += 1
+            continue
+        await db.execute(
+            text(
+                "UPDATE kb_chunks SET embedding = CAST(:emb AS vector),"
+                " embedding_model = :m, embedding_dimensions = :d WHERE id = :id"
+            ).bindparams(
+                emb=str(emb), m=settings.embedding_model, d=settings.embedding_dim, id=row.id
+            )
+        )
+        succeeded += 1
+
+    # embedding 停止期間中に failed_embedding で止まった kb_sessions を修復する。
+    repaired = (
+        await db.execute(
+            text(
+                "UPDATE kb_sessions s SET ingest_state = 'embedded'"
+                " WHERE s.ingest_state = 'failed_embedding'"
+                " AND EXISTS (SELECT 1 FROM kb_chunks c WHERE c.source_type = 'session'"
+                "   AND c.source_id = s.id AND c.embedding IS NOT NULL)"
+            )
+        )
+    ).rowcount
+    await db.commit()
+
+    return ReembedResponse(
+        model=settings.embedding_model,
+        processed=len(rows),
+        succeeded=succeeded,
+        failed=failed,
+        remaining=max(0, remaining_row - succeeded),
+        sessions_repaired=repaired or 0,
+        dry_run=False,
+    )
