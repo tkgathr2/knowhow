@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Select, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.embedding import clamp_top_k, create_embedding, escape_like
 from app.models import KbChunk, KbProject
@@ -79,7 +80,7 @@ async def search_chunks(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
         vector_q = (
             _base_chunk_query(req.project_key, min_confidence)
             .add_columns(similarity)
-            .where(KbChunk.embedding.isnot(None))
+            .where(KbChunk.embedding.isnot(None), KbChunk.embedding_model == settings.embedding_model)
             .order_by(similarity.desc())
             .limit(top_k)
         )
@@ -172,6 +173,7 @@ _RRF_SQL = text(
         FROM kb_chunks
         WHERE project_key = :pk AND is_deprecated = false
           AND confidence_score >= :min_conf AND embedding IS NOT NULL
+          AND embedding_model = :model
         ORDER BY embedding <=> CAST(:emb AS vector)
         LIMIT :n_each
     ),
@@ -233,6 +235,7 @@ async def search_hybrid(req: SearchRequest, db: AsyncSession = Depends(get_db)) 
     params = {
         "pk": req.project_key, "q": req.query, "min_conf": min_confidence,
         "n_each": n_each, "n_final": top_k, "k": k_rrf,
+        "model": settings.embedding_model,
     }
     results: list[ChunkResult] = []
     try:

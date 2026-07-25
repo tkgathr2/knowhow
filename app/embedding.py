@@ -14,6 +14,7 @@ _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 _GEMINI_TIMEOUT = 30.0
 _MAX_RETRIES = 3
 _BATCH_SIZE_LIMIT = 100  # batchEmbedContents の API 上限
+_CIRCUIT_BREAKER_THRESHOLD = 5  # バッチ内フォールバックが連続失敗した回数の上限
 
 
 def _get_openai_client() -> AsyncOpenAI:
@@ -32,15 +33,29 @@ def l2_normalize(vec: list[float]) -> list[float]:
     return [v / norm for v in vec]
 
 
-async def _post_gemini(client: httpx.AsyncClient, url: str, payload: dict) -> httpx.Response:
-    """429/5xx を指数バックオフで再試行し、最終レスポンスを返す。"""
+async def _post_gemini(client: httpx.AsyncClient, url: str, payload: dict) -> httpx.Response | None:
+    """429/5xx、および httpx のタイムアウト/接続エラーを指数バックオフで再試行する。
+
+    タイムアウト(httpx.TimeoutException)や接続断・DNS失敗等(httpx.TransportError)は
+    HTTPステータスとして返ってこないため、ステータスコードによる分岐だけでは検知できない。
+    ここで捕捉し、429/5xx と同様にバックオフ→再試行の対象にする。
+    全リトライを使い果たしてもなお失敗した場合は None を返し、呼び出し元に失敗を伝える
+    （呼び出し元は None を素通しして create_embedding の None 契約を維持する）。
+    """
     resp: httpx.Response | None = None
     for attempt in range(_MAX_RETRIES + 1):
-        resp = await client.post(
-            url,
-            json=payload,
-            headers={"x-goog-api-key": settings.google_generative_ai_api_key},
-        )
+        try:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={"x-goog-api-key": settings.google_generative_ai_api_key},
+            )
+        except (httpx.TimeoutException, httpx.TransportError):
+            resp = None
+            if attempt < _MAX_RETRIES:
+                await asyncio.sleep(2 ** attempt * 5)  # 5s, 10s, 20s
+                continue
+            return None
         if resp.status_code not in (429, 500, 502, 503):
             return resp
         if attempt < _MAX_RETRIES:
@@ -59,6 +74,8 @@ async def _embed_google(text_value: str) -> list[float] | None:
                 "taskType": "RETRIEVAL_DOCUMENT",
             }
             resp = await _post_gemini(client, url, payload)
+            if resp is None:
+                return None
             if resp.status_code == 200:
                 values = resp.json().get("embedding", {}).get("values")
                 if not values:
@@ -80,6 +97,8 @@ async def _embed_google_query(text_value: str) -> list[float] | None:
             "taskType": "RETRIEVAL_QUERY",
         }
         resp = await _post_gemini(client, url, payload)
+        if resp is None:
+            return None
         if resp.status_code == 200:
             values = resp.json().get("embedding", {}).get("values")
             if not values:
@@ -140,15 +159,30 @@ async def create_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
                 ]
             }
             resp = await _post_gemini(client, url, payload)
-            if resp.status_code == 200:
+            if resp is not None and resp.status_code == 200:
                 embeddings = resp.json().get("embeddings", [])
                 for i in range(len(batch)):
                     values = embeddings[i].get("values") if i < len(embeddings) else None
                     results.append(l2_normalize(values) if values else None)
             else:
                 # バッチ失敗 → 単発フォールバック（長文 400 の切り詰め再試行も効く）
+                # ただし連続失敗が閾値を超えたらサーキットブレーカーを開き、
+                # 残り全件を即 None 確定して打ち切る（クォータ枯渇時に
+                # 1件ずつ遅いリトライを繰り返して数時間かかる事態を防ぐ）。
+                consecutive_failures = 0
+                circuit_open = False
                 for t in batch:
-                    results.append(await _embed_google(t))
+                    if circuit_open:
+                        results.append(None)
+                        continue
+                    single = await _embed_google(t)
+                    results.append(single)
+                    if single is None:
+                        consecutive_failures += 1
+                        if consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
+                            circuit_open = True
+                    else:
+                        consecutive_failures = 0
     return results
 
 

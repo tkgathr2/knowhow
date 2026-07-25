@@ -480,6 +480,10 @@ async def admin_reembed(
     冪等・再開可能：処理済み（現行モデルで embedding あり）は対象から自然に外れるため、
     remaining が 0 になるまで繰り返し呼ぶだけでよい。失敗分は次回呼び出しで再試行される。
     無料枠のレート制御は embedding 層（batchEmbedContents + バックオフ）が担う。
+
+    対象行は SELECT ... FOR UPDATE SKIP LOCKED で行ロックする（bug-check-lab 田所指摘・
+    Medium）。手動実行と毎日17:15の定時実行が重なっても、既に他トランザクションが処理中の
+    行はスキップされるため、同じ行への Gemini 呼び出し（クォータ消費）が二重に走らない。
     """
     from app.embedding import create_embeddings_batch
 
@@ -491,6 +495,7 @@ async def admin_reembed(
                 " WHERE coalesce(content, '') <> ''"
                 " AND (embedding IS NULL OR embedding_model <> :m)"
                 " ORDER BY id LIMIT :lim"
+                " FOR UPDATE SKIP LOCKED"
             ).bindparams(m=settings.embedding_model, lim=limit)
         )
     ).all()
@@ -516,10 +521,27 @@ async def admin_reembed(
             dry_run=dry_run,
         )
 
-    embeddings = await create_embeddings_batch([r.content for r in rows])
+    # Critical(bug-check-lab 北村・田所指摘): create_embeddings_batch を1回の呼び出しに
+    # 全件まとめて渡すと、途中で予期しない例外が飛んだ場合にそれまで成功していた分の
+    # embedding も一切 DB へ反映されずに失われる（クォータは消費済みなので無駄撃ちになる）。
+    # ここではサブバッチ（Gemini batchEmbedContents の上限と同じ100件）単位で呼び出し、
+    # 例外発生時もそれ以前に完了したサブバッチの結果は failed 扱いにせず保存する。
+    # create_embeddings_batch 自体の戻り値契約（list[list[float] | None]・入力順維持）は
+    # 変更しない。
+    REEMBED_SUBBATCH_SIZE = 100
+    embeddings: list[list[float] | None] = []
+    for start in range(0, len(rows), REEMBED_SUBBATCH_SIZE):
+        sub_rows = rows[start : start + REEMBED_SUBBATCH_SIZE]
+        try:
+            sub_embeddings = await create_embeddings_batch([r.content for r in sub_rows])
+        except Exception:  # noqa: BLE001 — ここまでの成功分は下で保存し、残りは次回呼び出しに委ねる
+            break
+        embeddings.extend(sub_embeddings)
+
+    processed_rows = rows[: len(embeddings)]
     succeeded = 0
-    failed = 0
-    for row, emb in zip(rows, embeddings):
+    failed = len(rows) - len(processed_rows)
+    for row, emb in zip(processed_rows, embeddings):
         if emb is None:
             failed += 1
             continue

@@ -28,6 +28,7 @@ _RECALL_RRF_SQL = text(
         FROM kb_chunks
         WHERE project_key = :pk AND is_deprecated = false
           AND confidence_score >= :min_conf AND embedding IS NOT NULL
+          AND embedding_model = :model
         ORDER BY embedding <=> CAST(:emb AS vector)
         LIMIT :n_each
     ),
@@ -116,6 +117,7 @@ async def recall(
                     "pk": req.project_key, "q": req.query, "min_conf": min_confidence,
                     "emb": _recall_vec_literal(query_embedding),
                     "n_each": _n_each, "n_final": top_k, "k": 60,
+                    "model": settings.embedding_model,
                 },
             )
             for _r in _rrf_rows:
@@ -140,7 +142,7 @@ async def recall(
                 KbChunk.tags,
                 similarity,
             )
-            .where(*base_where, KbChunk.embedding.isnot(None))
+            .where(*base_where, KbChunk.embedding.isnot(None), KbChunk.embedding_model == settings.embedding_model)
             .order_by(similarity.desc())
             .limit(top_k)
         )
