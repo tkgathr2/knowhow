@@ -35,9 +35,11 @@ async def health_embedding(db: AsyncSession = Depends(get_db)) -> dict:
 
     ok=false なら意味検索が死んでいる。朝パトロールはここを見る。
     """
+    provider = settings.active_embedding_provider
     result: dict = {
         "ok": False,
-        "keyConfigured": bool(settings.openai_api_key),
+        "provider": provider,
+        "keyConfigured": provider != "none",
         "model": settings.embedding_model,
         "dimensions": settings.embedding_dim,
     }
