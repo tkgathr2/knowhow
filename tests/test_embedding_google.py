@@ -172,3 +172,48 @@ async def test_batch_failure_falls_back_to_singles(google_provider):
     out = await create_embeddings_batch(["a", "b"])
     assert out[0] is not None
     assert out[1] is None
+
+
+# --- 2026-07-25 bug-check-lab 再現テスト（本体は未修正のため red のまま） -----------
+#
+# 北村（ロジック）指摘: _post_gemini は client.post() を try/except で囲んでおらず、
+# HTTPステータスとして返る 429/5xx にしかバックオフが効かない。本番で実際に観測した
+# 障害（Gemini無料枠クォータ枯渇時、応答が60〜100秒以上返らずRailwayが502を返す）は
+# httpx側のタイムアウト例外として現れるため、このバックオフ機構は無力どころか、
+# 呼び出し元（admin_reembed / create_embedding 経由の /search /devin/recall 等）まで
+# 例外がそのまま伝播してしまう。
+
+
+class RaisingAsyncClient(FakeAsyncClient):
+    """post() が例外を投げるフェイク（httpx のタイムアウト/接続断を模倣）。"""
+
+    exc_to_raise: BaseException = RuntimeError("boom")
+
+    async def post(self, url, json=None, headers=None):
+        raise RaisingAsyncClient.exc_to_raise
+
+
+async def test_post_gemini_timeout_is_not_caught_bug_reproduction(monkeypatch):
+    """再現テスト: httpx がタイムアウト例外を送出すると create_embedding は
+    None を返さず例外をそのまま呼び出し元へ伝播させてしまう（failed_embedding
+    契約違反）。本体修正後はこの assert が「例外は起きず None が返る」に変わる想定。
+    現状は Critical バグの実証のため意図的に red。
+    """
+    import httpx
+
+    monkeypatch.setattr(settings, "embedding_provider", "google")
+    monkeypatch.setattr(settings, "google_generative_ai_api_key", "test-key")
+    monkeypatch.setattr(settings, "embedding_model", GOOGLE_EMBEDDING_MODEL)
+    monkeypatch.setattr(emb_mod.httpx, "AsyncClient", RaisingAsyncClient)
+    monkeypatch.setattr(emb_mod.asyncio, "sleep", _no_sleep)
+    RaisingAsyncClient.exc_to_raise = httpx.ReadTimeout("simulated Gemini hang")
+
+    # 期待される安全な契約（他の create_embedding 失敗系テストと同じく None を返す）
+    # だが現状の実装はここで httpx.ReadTimeout をそのまま外へ投げるため、
+    # このテストは「例外が伝播しないこと」を検証して red になる。
+    result = await create_embedding("this should not hang the caller")
+    assert result is None, (
+        "create_embedding は失敗時に None を返す契約のはずだが、"
+        "_post_gemini が client.post() の例外を捕捉していないため、"
+        "httpx.ReadTimeout 等がそのまま呼び出し元(admin_reembed/search/devin.recall)まで伝播する"
+    )
