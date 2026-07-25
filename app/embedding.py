@@ -186,6 +186,62 @@ async def create_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     return results
 
 
+async def diagnose_embedding() -> dict:
+    """監視用: embedding を1回だけ実測し、失敗の「本当の理由」まで返す。
+
+    create_embedding は契約上どんな失敗でも None を返すため、監視側からは
+    「キー未設定」も「無料枠の使い切り(429)」も「入力長超過(400)」も
+    区別がつかない。実際 2026-07-26 の朝パトロールで Gemini の
+    embed_content 無料枠(1000件/日)を使い切って 429 が返っていたのに
+    /health/embedding は "API key not configured" と表示し、原因究明が
+    遠回りになった。ここでは HTTP ステータスと API のエラーメッセージを
+    そのまま返して誤診を防ぐ。
+
+    リトライはしない（監視は現時点の生の状態を最短で知りたいため）。
+    """
+    provider = settings.active_embedding_provider
+    if provider == "none":
+        return {"ok": False, "reason": "no_api_key", "detail": "embedding provider 未設定"}
+
+    if provider == "openai":
+        try:
+            vector = await create_embedding("health check")
+        except Exception as exc:  # noqa: BLE001 - 失敗理由をそのまま監視に出す
+            return {"ok": False, "reason": "api_error", "detail": f"{type(exc).__name__}: {exc}"[:300]}
+        if vector is None or len(vector) != settings.embedding_dim:
+            return {"ok": False, "reason": "api_error", "detail": "embedding が返らなかった"}
+        return {"ok": True, "reason": "ok", "detail": ""}
+
+    url = f"{_GEMINI_BASE}/{settings.embedding_model}:embedContent"
+    payload = {
+        "content": {"parts": [{"text": "health check"}]},
+        "outputDimensionality": settings.embedding_dim,
+        "taskType": "RETRIEVAL_DOCUMENT",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_GEMINI_TIMEOUT) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={"x-goog-api-key": settings.google_generative_ai_api_key},
+            )
+    except Exception as exc:  # noqa: BLE001 - タイムアウト/接続断もそのまま出す
+        return {"ok": False, "reason": "network_error", "detail": f"{type(exc).__name__}: {exc}"[:300]}
+
+    if resp.status_code == 200:
+        values = resp.json().get("embedding", {}).get("values")
+        if values and len(values) == settings.embedding_dim:
+            return {"ok": True, "reason": "ok", "detail": ""}
+        return {"ok": False, "reason": "api_error", "detail": "200 だが values が空/次元不一致"}
+
+    reason = "quota_exhausted" if resp.status_code == 429 else "api_error"
+    try:
+        detail = resp.json().get("error", {}).get("message", "")
+    except Exception:  # noqa: BLE001
+        detail = resp.text
+    return {"ok": False, "reason": reason, "httpStatus": resp.status_code, "detail": detail[:300]}
+
+
 def escape_like(query: str) -> str:
     return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 

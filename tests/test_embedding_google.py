@@ -217,3 +217,52 @@ async def test_post_gemini_timeout_is_not_caught_bug_reproduction(monkeypatch):
         "_post_gemini が client.post() の例外を捕捉していないため、"
         "httpx.ReadTimeout 等がそのまま呼び出し元(admin_reembed/search/devin.recall)まで伝播する"
     )
+
+
+async def test_diagnose_reports_quota_exhausted_not_missing_key(google_provider):
+    """429 は「キー未設定」ではなく quota_exhausted として報告する。
+
+    2026-07-26 の朝パトロールで Gemini の embed_content 無料枠(1000件/日)を
+    使い切って 429 が返っていたのに /health/embedding が
+    "API key not configured" と表示し、原因の切り分けが遠回りになった。
+    設定ミスと課金枯渇は対処がまったく違うので同じ文言にしない。
+    """
+    google_provider.queue = [
+        FakeResponse(429, {"error": {"message": "You exceeded your current quota"}})
+    ]
+
+    diag = await emb_mod.diagnose_embedding()
+
+    assert diag["ok"] is False
+    assert diag["reason"] == "quota_exhausted"
+    assert diag["httpStatus"] == 429
+    assert "quota" in diag["detail"]
+
+
+async def test_diagnose_does_not_retry_on_429(google_provider):
+    """監視は現時点の生の状態を最短で知りたいのでリトライしない。"""
+    google_provider.queue = [FakeResponse(429, {"error": {"message": "quota"}})]
+
+    await emb_mod.diagnose_embedding()
+
+    assert len(google_provider.calls) == 1
+
+
+async def test_diagnose_ok_when_gemini_returns_vector(google_provider):
+    google_provider.queue = [FakeResponse(200, {"embedding": {"values": _vec()}})]
+
+    diag = await emb_mod.diagnose_embedding()
+
+    assert diag["ok"] is True
+    assert diag["reason"] == "ok"
+
+
+async def test_diagnose_reports_no_api_key_when_provider_none(monkeypatch):
+    monkeypatch.setattr(settings, "embedding_provider", "")
+    monkeypatch.setattr(settings, "google_generative_ai_api_key", "")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+
+    diag = await emb_mod.diagnose_embedding()
+
+    assert diag["ok"] is False
+    assert diag["reason"] == "no_api_key"
