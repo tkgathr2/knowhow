@@ -16,6 +16,13 @@ _MAX_RETRIES = 3
 _BATCH_SIZE_LIMIT = 100  # batchEmbedContents の API 上限
 _CIRCUIT_BREAKER_THRESHOLD = 5  # バッチ内フォールバックが連続失敗した回数の上限
 
+# バッチ送信前に 1 件あたりを切り詰める文字数。
+# 上限は 2,048 トークンだが、日本語は 1 文字がほぼ 1 トークンに乗るため
+# 最悪ケース（全角のみ）でも収まる 2,000 文字を採る。単発経路は 400 を受けてから
+# 半分に切る「事後」対応で済むが、バッチ経路は 1 件の超過がバッチ全体を巻き添えに
+# するので「事前」に切る必要がある（2026-07-26 の無料枠溶かし事故の再発防止）。
+_GEMINI_MAX_INPUT_CHARS = 2000
+
 
 def _get_openai_client() -> AsyncOpenAI:
     global _openai_client
@@ -130,12 +137,72 @@ async def create_embedding(text_value: str, *, task: str = "document") -> list[f
     return None
 
 
+async def _embed_google_batch(
+    client: httpx.AsyncClient, url: str, model_ref: str, batch: list[str]
+) -> tuple[list[list[float] | None] | None, int | None]:
+    """batchEmbedContents で 1 バッチを処理する。
+
+    戻り値は (results, status)。results が None のときはバッチ経路では処理できず、
+    呼び出し元がフォールバックの要否を status で判断する。
+
+    400（入力長超過）の扱い（2026-07-26 修正）:
+      Gemini の embedContent は 1 件あたり 2,048 トークンが上限で、超えると 400 が返る。
+      単発経路 `_embed_google` は 400 を受けて本文を半分に切って再試行するが、
+      バッチ経路にはこの処理が無かったため、100 件のうち 1 件でも長すぎると
+      バッチ全体が 400 で落ち、100 件すべてが単発フォールバックへ回っていた。
+      その結果 1 リクエストで済むはずの処理が 100 リクエストに膨らみ、
+      Gemini 無料枠の日次上限(1,000)を溶かしていた（本番実測: バックフィルが
+      1 日 48 件しか進まない）。呼び出し前の切り詰めでほぼ防げるが、保険として
+      400 が返った場合はバッチを半分に割って再帰し、長すぎる 1 件だけを単発へ落とす。
+      消費リクエスト数は N ではなく log2(N) 程度に収まる。
+    """
+    payload = {
+        "requests": [
+            {
+                "model": model_ref,
+                "content": {"parts": [{"text": (t[:_GEMINI_MAX_INPUT_CHARS] if t else " ")}]},
+                "outputDimensionality": settings.embedding_dim,
+                "taskType": "RETRIEVAL_DOCUMENT",
+            }
+            for t in batch
+        ]
+    }
+    resp = await _post_gemini(client, url, payload)
+    if resp is None:
+        return None, None
+    if resp.status_code == 200:
+        embeddings = resp.json().get("embeddings", [])
+        out: list[list[float] | None] = []
+        for i in range(len(batch)):
+            values = embeddings[i].get("values") if i < len(embeddings) else None
+            out.append(l2_normalize(values) if values else None)
+        return out, 200
+    if resp.status_code == 400:
+        if len(batch) == 1:
+            # この 1 件が（切り詰め後もなお）長すぎる。400 を受けて半分に切り直す
+            # 単発経路へ委ねる。
+            return [await _embed_google(batch[0])], 400
+        mid = len(batch) // 2
+        left, left_status = await _embed_google_batch(client, url, model_ref, batch[:mid])
+        right, right_status = await _embed_google_batch(client, url, model_ref, batch[mid:])
+        if left is None and right is None:
+            return None, left_status or right_status or 400
+        # 片側だけ失敗した場合、成功した側の結果は捨てずに残す
+        # （クォータは消費済みなので捨てると二重に損をする）。
+        left = left if left is not None else [None] * mid
+        right = right if right is not None else [None] * (len(batch) - mid)
+        return left + right, 400
+    return None, resp.status_code
+
+
 async def create_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     """複数テキストを一括 embedding（reembed 用）。入力順と同順で返す。
 
     Google: batchEmbedContents（N 件 = 1 リクエスト）で無料枠の日次リクエスト上限を節約。
     バッチ全体が失敗したら 1 件ずつの単発呼び出しにフォールバックする
     （1 件の不正入力がバッチ全滅を招くのを防ぐ）。
+    ただし 429（日次クォータ枯渇）だけは例外で、単発に落ちても同じ 429 を貰うだけなので
+    即座に打ち切る（フォールバックがクォータを無駄撃ちするのを防ぐ）。
     """
     provider = settings.active_embedding_provider
     if provider != "google":
@@ -144,45 +211,45 @@ async def create_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     results: list[list[float] | None] = []
     url = f"{_GEMINI_BASE}/{settings.embedding_model}:batchEmbedContents"
     model_ref = f"models/{settings.embedding_model}"
+    quota_exhausted = False
     async with httpx.AsyncClient(timeout=60.0) as client:
         for start in range(0, len(texts), _BATCH_SIZE_LIMIT):
             batch = texts[start : start + _BATCH_SIZE_LIMIT]
-            payload = {
-                "requests": [
-                    {
-                        "model": model_ref,
-                        "content": {"parts": [{"text": t if t else " "}]},
-                        "outputDimensionality": settings.embedding_dim,
-                        "taskType": "RETRIEVAL_DOCUMENT",
-                    }
-                    for t in batch
-                ]
-            }
-            resp = await _post_gemini(client, url, payload)
-            if resp is not None and resp.status_code == 200:
-                embeddings = resp.json().get("embeddings", [])
-                for i in range(len(batch)):
-                    values = embeddings[i].get("values") if i < len(embeddings) else None
-                    results.append(l2_normalize(values) if values else None)
-            else:
-                # バッチ失敗 → 単発フォールバック（長文 400 の切り詰め再試行も効く）
-                # ただし連続失敗が閾値を超えたらサーキットブレーカーを開き、
-                # 残り全件を即 None 確定して打ち切る（クォータ枯渇時に
-                # 1件ずつ遅いリトライを繰り返して数時間かかる事態を防ぐ）。
-                consecutive_failures = 0
-                circuit_open = False
-                for t in batch:
-                    if circuit_open:
-                        results.append(None)
-                        continue
-                    single = await _embed_google(t)
-                    results.append(single)
-                    if single is None:
-                        consecutive_failures += 1
-                        if consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
-                            circuit_open = True
-                    else:
-                        consecutive_failures = 0
+            if quota_exhausted:
+                results.extend([None] * len(batch))
+                continue
+
+            sub, status_code = await _embed_google_batch(client, url, model_ref, batch)
+            if sub is not None:
+                results.extend(sub)
+                continue
+
+            if status_code == 429:
+                # 日次クォータ枯渇。ここで単発フォールバックすると 1 件ごとに
+                # バックオフ付きで 429 を貰い直すだけで、残りわずかな枠まで
+                # 使い切ってしまう。以降のバッチも含めて即 None 確定で打ち切る。
+                quota_exhausted = True
+                results.extend([None] * len(batch))
+                continue
+
+            # バッチ失敗 → 単発フォールバック（長文 400 の切り詰め再試行も効く）
+            # ただし連続失敗が閾値を超えたらサーキットブレーカーを開き、
+            # 残り全件を即 None 確定して打ち切る（クォータ枯渇時に
+            # 1件ずつ遅いリトライを繰り返して数時間かかる事態を防ぐ）。
+            consecutive_failures = 0
+            circuit_open = False
+            for t in batch:
+                if circuit_open:
+                    results.append(None)
+                    continue
+                single = await _embed_google(t)
+                results.append(single)
+                if single is None:
+                    consecutive_failures += 1
+                    if consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
+                        circuit_open = True
+                else:
+                    consecutive_failures = 0
     return results
 
 
