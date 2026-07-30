@@ -40,6 +40,20 @@ def l2_normalize(vec: list[float]) -> list[float]:
     return [v / norm for v in vec]
 
 
+# 残高枯渇（prepayment depleted / insufficient_quota）は待っても回復しない永続エラー。
+# 一時的なレート超過と同じくバックオフすると 1 リクエストあたり 35 秒（5+10+20）を無駄に
+# 待ち、recall が実測 36 秒＝呼び出し側のタイムアウトを軒並み超える
+# （2026-07-31 日次パトロールで検知。kaizen-health の 4 秒タイムアウトが5回連続 failure）。
+_PERMANENT_QUOTA_MARKERS = ("credits are depleted", "insufficient_quota", "prepayment")
+
+
+def _is_permanent_quota_error(resp: httpx.Response) -> bool:
+    if resp.status_code != 429:
+        return False
+    body = (resp.text or "").lower()
+    return any(marker in body for marker in _PERMANENT_QUOTA_MARKERS)
+
+
 async def _post_gemini(client: httpx.AsyncClient, url: str, payload: dict) -> httpx.Response | None:
     """429/5xx、および httpx のタイムアウト/接続エラーを指数バックオフで再試行する。
 
@@ -65,6 +79,8 @@ async def _post_gemini(client: httpx.AsyncClient, url: str, payload: dict) -> ht
             return None
         if resp.status_code not in (429, 500, 502, 503):
             return resp
+        if _is_permanent_quota_error(resp):
+            return resp  # 残高が尽きている＝待っても回復しないので即座に諦める
         if attempt < _MAX_RETRIES:
             await asyncio.sleep(2 ** attempt * 5)  # 5s, 10s, 20s
     return resp
