@@ -75,7 +75,7 @@
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
       <h2 class="font-semibold text-sm text-gray-700 mb-1">ツール別</h2>
-      <p class="text-xs text-gray-400 mb-3">バー=回数 / 右端%=削減トークン占有率</p>
+      <p class="text-xs text-gray-400 mb-3">バー=回数 / <span class="text-orange-500">橙=削減トークン数</span> / 右端%=占有率</p>
       <div id="byTool" class="space-y-2"></div>
     </div>
   </div>
@@ -106,15 +106,17 @@ function card(label,value,sub){
     <div class="text-xs text-gray-400 mt-0.5">${sub||''}</div></div>`;
 }
 
-function bars(rows, max, labelMap, color){
+function bars(rows, max, labelMap, color, showTokens){
   if(!rows.length)return '<p class="text-xs text-gray-400">データなし</p>';
   return rows.map(r=>{
     const name=labelMap?(labelMap[r.name]||r.name):r.name;
     const pct=(r.token_pct!=null)?r.token_pct:0;
+    const tokLabel=showTokens?`<span class="w-16 text-right text-xs text-orange-600 font-medium" title="推定削減トークン数">${hum(r.est_tokens||0)}tok</span>`:'';
     return `<div class="flex items-center gap-2">
       <span class="w-24 text-xs text-gray-600 truncate" title="${esc(name)}">${esc(name)}</span>
       <span class="flex-1 h-3.5 bg-gray-100 rounded overflow-hidden"><span style="display:block;height:100%;width:${Math.round(r.count/max*100)}%;background:${color};border-radius:4px;"></span></span>
       <span class="w-8 text-right text-xs font-semibold text-gray-700">${fmt(r.count)}</span>
+      ${tokLabel}
       <span class="w-14 text-right text-xs text-gray-400" title="削減トークン占有率">${pct}%</span></div>`;
   }).join('');
 }
@@ -159,7 +161,7 @@ async function load(){
   const maxT=Math.max(1,...t.by_tool.map(r=>r.count));
   document.getElementById('byReason').innerHTML=bars(t.by_reason,maxR,REASON_JA,'#7F77DD');
   document.getElementById('byPc').innerHTML=bars(t.by_pc,maxP,null,'#1D9E75');
-  document.getElementById('byTool').innerHTML=bars(t.by_tool,maxT,null,'#D85A30');
+  document.getElementById('byTool').innerHTML=bars(t.by_tool,maxT,null,'#D85A30',true);
   renderDaily(d);
   const rc=d.recent||[];
   document.getElementById('recent').innerHTML = rc.length? rc.map(e=>`
