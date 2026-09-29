@@ -270,15 +270,13 @@ function funnelView(f){
   return `<div class="flex items-end gap-2 sm:gap-4 px-1">${cols}</div>`;
 }
 
-function renderDetail(){
-  const box=document.getElementById('detail');
-  const r=reports.find(x=>x.id===selectedId);
-  if(!r){box.innerHTML='<div class="report p-8"><p class="text-sm text-gray-400">日報を選んでください</p></div>';return;}
+// 1件分の日報HTML（一覧表示でも単体表示でも使う共通テンプレート）
+function reportBlock(r){
   const m=r.metrics||{};
   const hasKpi=(m&&typeof m==='object'&&(('achv_pct' in m)||Object.keys(m).some(k=>k!=='funnel')));
   let n=0; const num=()=>String(++n).padStart(2,'0');
-  box.innerHTML=`
-   <div class="report p-7 sm:p-10">
+  return `
+   <div id="rpt-${r.id}" class="report p-7 sm:p-10 scroll-mt-4">
     <!-- 表題 -->
     <div class="h-1.5 -mx-7 sm:-mx-10 -mt-7 sm:-mt-10 mb-7 rounded-t-[7px]" style="background:linear-gradient(90deg,var(--accent),var(--accent2))"></div>
     <div class="flex items-center justify-between mb-4">
@@ -313,10 +311,23 @@ function renderDetail(){
     </div>
    </div>
   `;
+}
+
+// 右側：全件をずらずらっと縦に並べて一覧表示（1件ずつクリックして切り替える方式から変更）
+function renderDetail(){
+  const box=document.getElementById('detail');
+  if(!reports.length){box.innerHTML='<div class="report p-8"><p class="text-sm text-gray-400">日報がありません</p></div>';return;}
+  box.innerHTML=reports.map(r=>reportBlock(r)).join('<div class="h-6"></div>');
   box.querySelectorAll('[data-hl]').forEach(highlight);
 }
 
-function selectReport(id){selectedId=id;renderDateList();renderDetail();window.scrollTo({top:0,behavior:'smooth'});}
+// 左の日付リストは「選択」ではなく、その日報の位置までスクロールするジャンプリンクとして使う
+function selectReport(id){
+  selectedId=id;
+  renderDateList();
+  const el=document.getElementById('rpt-'+id);
+  if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
+}
 
 let wantId=null;  // ?id= で索引ページから来たときに開く日報
 function initDeptFromUrl(){
@@ -334,10 +345,13 @@ async function load(){
   loadAuth();
   const d=await api(`/api/nippou?department=${dept}&limit=60`);
   reports=(d&&d.items)||[];
-  if(wantId && reports.some(r=>r.id===wantId)){ selectedId=wantId; wantId=null; }
+  let jumpId=null;
+  if(wantId && reports.some(r=>r.id===wantId)){ selectedId=wantId; jumpId=wantId; wantId=null; }
   if(!selectedId&&reports.length) selectedId=reports[0].id;
   renderDateList();
   renderDetail();
+  // ?id= 付きで来た(索引ページからのリンク等)時だけ、その日報の位置までスクロール
+  if(jumpId){ const el=document.getElementById('rpt-'+jumpId); if(el) el.scrollIntoView({block:'start'}); }
 }
 
 initDeptFromUrl();
