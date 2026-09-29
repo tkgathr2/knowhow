@@ -1203,6 +1203,7 @@ class BuchoDetailResponse(BaseModel):
     added_prev: int
     growth_pct: float | None
     recalls: int
+    narrative: str = ""
     monthly: list[dict]
     daily: list[dict]
     recent_items: list[dict]

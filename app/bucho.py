@@ -203,6 +203,48 @@ def month_labels(now_month: str, n: int = 6) -> list[str]:
     return list(reversed(out))
 
 
+def narrative(d: dict) -> str:
+    """部長詳細ページの見出しに出す、数字を解釈した一言（自動生成）。
+
+    「量が増えた」だけでなく「ペースが落ちていないか」「使われているか」まで
+    1文で答える。誇張も過小評価もせず、判定不能な時は素直に「判定できません」と書く
+    （2026-09-30 社長「しっかり成長しているか確認したい」を受けて追加）。
+    """
+    total = d.get("total", 0)
+    added = d.get("added", 0)
+    growth_pct = d.get("growth_pct")
+    recalls = d.get("recalls", 0)
+    daily = d.get("daily") or []
+
+    if total == 0:
+        return "まだ知恵がありません（これから）。"
+
+    parts: list[str] = []
+    if growth_pct is not None:
+        parts.append(f"直近の集計期間で+{added}件（{'+' if growth_pct >= 0 else ''}{growth_pct}%）")
+    else:
+        parts.append(f"直近の集計期間で+{added}件（比較対象なし＝新規）")
+
+    # "本日" はまだ集計が終わっていないだけの0件がありうるため、実績のある直近日どうしで比較する
+    # （daily[-1]が今日の未確定ゼロなだけで「ペースが落ちた」と誤判定しない）。
+    nonzero_days = [x for x in daily if x.get("added", 0) > 0]
+    if len(nonzero_days) >= 2:
+        peak = max(x["added"] for x in nonzero_days)
+        latest = nonzero_days[-1]["added"]
+        if peak > 0 and latest < peak * 0.5:
+            drop_pct = round((peak - latest) / peak * 100, 1)
+            parts.append(f"。直近日はピーク(1日{peak}件)から-{drop_pct}%とペースが落ちています。要確認")
+        elif latest >= peak:
+            parts.append("。直近日もペースは落ちていません")
+
+    if recalls > 0:
+        parts.append(f"。実際に使われた回数は{recalls}回")
+    else:
+        parts.append("。まだ実際に使われた記録（recall）はありません")
+
+    return "".join(parts) + "。"
+
+
 def day_labels(now: datetime, n: int = 10) -> list[str]:
     """now から過去 n 日分の日付ラベル（YYYY-MM-DD）を古い順で返す（当日含む）。"""
     return [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n - 1, -1, -1)]
@@ -279,8 +321,7 @@ def detail(
             "recall_count": int(r.get("recall_count") or 0),
         }
 
-    return {
-        **d,
+    result = {
         "total": total,
         "added": added,
         "added_prev": added_prev,
@@ -292,3 +333,5 @@ def detail(
         "top_recalled": [_item(r) for r in top_recalled],
         "top_projects": top_projects,
     }
+    result["narrative"] = narrative(result)
+    return {**d, **result}

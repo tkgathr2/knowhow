@@ -142,6 +142,43 @@ class TestGrowthRatio:
         assert bucho.growth_ratio(0, 100) == 0.0
 
 
+class TestNarrative:
+    def test_no_data_yet(self):
+        assert bucho.narrative({"total": 0, "added": 0, "growth_pct": None, "recalls": 0, "daily": []}) \
+            == "まだ知恵がありません（これから）。"
+
+    def test_pace_dropped_uses_last_nonzero_day_not_trailing_zero(self):
+        # 本日分(最後の要素)がまだ0件でも、それだけで「ペースが落ちた」としない
+        d = {
+            "total": 10, "added": 3, "growth_pct": 42.9, "recalls": 5,
+            "daily": [
+                {"period": "2026-09-28", "added": 1},
+                {"period": "2026-09-29", "added": 2},
+                {"period": "2026-09-30", "added": 0},  # 未確定の0件
+            ],
+        }
+        text = bucho.narrative(d)
+        assert "ペースは落ちていません" in text
+        assert "要確認" not in text
+
+    def test_pace_actually_dropped(self):
+        d = {
+            "total": 20, "added": 3, "growth_pct": 10.0, "recalls": 5,
+            "daily": [
+                {"period": "2026-09-27", "added": 15},
+                {"period": "2026-09-28", "added": 8},
+                {"period": "2026-09-29", "added": 2},
+            ],
+        }
+        text = bucho.narrative(d)
+        assert "要確認" in text
+        assert "-86.7%" in text
+
+    def test_no_recalls_yet(self):
+        d = {"total": 1, "added": 1, "growth_pct": None, "recalls": 0, "daily": [{"period": "2026-09-30", "added": 1}]}
+        assert "まだ実際に使われた記録（recall）はありません" in bucho.narrative(d)
+
+
 class TestBuchoDefsRank:
     def test_kagura_is_svp_and_first(self):
         assert bucho.BUCHO_DEFS[0]["key"] == "kagura"

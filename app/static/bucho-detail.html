@@ -38,6 +38,8 @@
 
 <div class="max-w-5xl mx-auto px-4 py-6 space-y-5">
 
+  <div id="narrativeBar" class="hidden bg-indigo-50 border border-indigo-100 rounded-xl px-5 py-4 text-indigo-900 text-sm fade-in"></div>
+
   <div id="hero" class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 fade-in">読み込み中...</div>
 
   <div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
@@ -113,6 +115,11 @@ async function load(){
 
   document.title=`ノウハウキング君 — ${d.name}の成長`;
   document.getElementById('page-title').textContent=`${d.name}の成長`;
+
+  if(d.narrative){
+    document.getElementById('narrativeBar').textContent=d.narrative;
+    document.getElementById('narrativeBar').classList.remove('hidden');
+  }
 
   const g=d.growth_pct;
   const trend=g==null?'' :(g>=0?`<span class="text-emerald-600 font-semibold">↑ 前の30日より +${g}%</span>`
