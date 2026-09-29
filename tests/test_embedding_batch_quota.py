@@ -14,6 +14,8 @@
   4. 分割の片側だけ失敗しても、成功した側の結果は捨てない
 """
 
+import json
+
 import pytest
 
 from app import embedding as emb_mod
@@ -25,6 +27,7 @@ class FakeResponse:
     def __init__(self, status_code: int, payload: dict | None = None):
         self.status_code = status_code
         self._payload = payload or {}
+        self.text = json.dumps(self._payload)
 
     def json(self):
         return self._payload

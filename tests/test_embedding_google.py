@@ -10,6 +10,7 @@
   - バッチは入力順を保ち、バッチ全体失敗時は単発フォールバック
 """
 
+import json
 import math
 
 import pytest
@@ -23,6 +24,7 @@ class FakeResponse:
     def __init__(self, status_code: int, payload: dict | None = None):
         self.status_code = status_code
         self._payload = payload or {}
+        self.text = json.dumps(self._payload)
 
     def json(self):
         return self._payload
