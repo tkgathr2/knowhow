@@ -1106,6 +1106,7 @@ async def get_weekly_summary(db: AsyncSession = Depends(get_db)) -> WeeklySummar
 # --- 部長別の成長（5部長制・社長指示 2026/06/13） -----------------------------
 class BuchoCard(BaseModel):
     key: str
+    rank: str = "bucho"
     name: str
     title: str
     emoji: str
@@ -1189,6 +1190,7 @@ async def get_bucho_stats(days: int = 30, db: AsyncSession = Depends(get_db)) ->
 
 class BuchoDetailResponse(BaseModel):
     key: str
+    rank: str = "bucho"
     name: str
     title: str
     emoji: str
@@ -1202,6 +1204,7 @@ class BuchoDetailResponse(BaseModel):
     growth_pct: float | None
     recalls: int
     monthly: list[dict]
+    daily: list[dict]
     recent_items: list[dict]
     top_recalled: list[dict]
     top_projects: list[dict]
@@ -1245,6 +1248,6 @@ async def get_bucho_detail(
         for r in rows
     ]
     det = bucho_calc.detail(
-        data, key, since.isoformat(), prev_since.isoformat(), now.strftime("%Y-%m")
+        data, key, since.isoformat(), prev_since.isoformat(), now.strftime("%Y-%m"), now=now
     )
     return BuchoDetailResponse(days=days, since=since.strftime("%Y-%m-%d"), **det)

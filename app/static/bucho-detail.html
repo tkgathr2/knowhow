@@ -42,6 +42,12 @@
 
   <div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
 
+  <div id="dailyCard" class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in hidden">
+    <h2 class="font-semibold text-sm text-gray-700 mb-1">毎日どれだけ知恵が増えたか（直近<span id="dailyDaysLabel">10</span>日）</h2>
+    <p class="text-xs text-gray-400 mb-3">この部長の領域で1日ごとに増えた知恵の数</p>
+    <div style="position:relative;height:200px;"><canvas id="dailyChart"></canvas></div>
+  </div>
+
   <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 fade-in">
     <h2 class="font-semibold text-sm text-gray-700 mb-1">毎月どれだけ知恵が増えたか（直近6ヶ月）</h2>
     <p class="text-xs text-gray-400 mb-3">この部長の領域で増えた知恵の数</p>
@@ -75,6 +81,7 @@
 const API = window.location.origin;
 const KEY = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
 let monthChart;
+let dailyChart;
 
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function fmt(n){return n==null?'-':Number(n).toLocaleString('ja-JP');}
@@ -139,6 +146,23 @@ async function load(){
     data:{labels,datasets:[{label:'増えた知恵',data,backgroundColor:d.color+'CC',borderColor:d.color,borderWidth:1,borderRadius:6}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
   });
+
+  const daily=d.daily||[];
+  const dailyCard=document.getElementById('dailyCard');
+  if(daily.length){
+    dailyCard.classList.remove('hidden');
+    document.getElementById('dailyDaysLabel').textContent=daily.length;
+    const dLabels=daily.map(x=>x.period.slice(5));  // MM-DD
+    const dData=daily.map(x=>x.added);
+    if(dailyChart)dailyChart.destroy();
+    dailyChart=new Chart(document.getElementById('dailyChart'),{
+      type:'bar',
+      data:{labels:dLabels,datasets:[{label:'増えた知恵',data:dData,backgroundColor:d.color+'CC',borderColor:d.color,borderWidth:1,borderRadius:6}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
+    });
+  }else{
+    dailyCard.classList.add('hidden');
+  }
 
   const tr=d.top_recalled||[];
   const maxR=Math.max(1,...tr.map(t=>t.recall_count));

@@ -8,32 +8,34 @@
 
 from __future__ import annotations
 
-# 部長の定義（表示順もこの順）
+from datetime import datetime, timedelta
+
+# 部長の定義（表示順もこの順。ただしフロント(/bucho)は rank=svp を先頭固定で並べ替える）
 BUCHO_DEFS: list[dict] = [
+    {"key": "kagura", "name": "神楽 迅", "title": "AI・DX担当 副社長（CAIO/CDXO）", "emoji": "🤖",
+     "domain": "生成AI活用・業務自動化・DX・データ基盤・社長対話窓口", "color": "#16a34a", "rank": "svp"},
     {"key": "senmu", "name": "鷹司 統", "title": "専務取締役（執行No.2）", "emoji": "🎩",
-     "domain": "全社統括・部長間の裁定・優先順位・完遂", "color": "#334155"},
+     "domain": "全社統括・部長間の裁定・優先順位・完遂", "color": "#334155", "rank": "bucho"},
     {"key": "sanada", "name": "真田 啓", "title": "開発部長", "emoji": "🛠️",
-     "domain": "システム開発・AI・インフラ", "color": "#4f46e5"},
+     "domain": "システム開発・AI・インフラ", "color": "#4f46e5", "rank": "bucho"},
     {"key": "muroi", "name": "室井 剛", "title": "オペレーション部長（COO）", "emoji": "🔄",
-     "domain": "現場オペ・総務・業務標準化", "color": "#0d9488"},
+     "domain": "現場オペ・総務・業務標準化", "color": "#0d9488", "rank": "bucho"},
     {"key": "kujo", "name": "九条 玲", "title": "財務部長（CFO）", "emoji": "💰",
-     "domain": "お金・経理・数字", "color": "#d97706"},
+     "domain": "お金・経理・数字", "color": "#d97706", "rank": "bucho"},
     {"key": "kirishima", "name": "霧島 章吾", "title": "法務部長（CLO）", "emoji": "⚖️",
-     "domain": "契約・法律・コンプライアンス", "color": "#be123c"},
+     "domain": "契約・法律・コンプライアンス", "color": "#be123c", "rank": "bucho"},
     {"key": "todo", "name": "藤堂 一馬", "title": "経営管理部長", "emoji": "🧭",
-     "domain": "戦略・人事・組織・リスク", "color": "#7c3aed"},
+     "domain": "戦略・人事・組織・リスク", "color": "#7c3aed", "rank": "bucho"},
     {"key": "kaburagi", "name": "鏑木 蓮", "title": "マーケティング部長（CMO）", "emoji": "📣",
-     "domain": "集客・広告・リード・CRM/LTV", "color": "#ea580c"},
+     "domain": "集客・広告・リード・CRM/LTV", "color": "#ea580c", "rank": "bucho"},
     {"key": "kuze", "name": "久世 澪", "title": "デザイン部長（CDO）", "emoji": "🎨",
-     "domain": "UI/UX・画面/LP設計・デザインシステム", "color": "#db2777"},
+     "domain": "UI/UX・画面/LP設計・デザインシステム", "color": "#db2777", "rank": "bucho"},
     {"key": "kuon", "name": "久遠 颯", "title": "ブランディング部長（CBO）", "emoji": "✨",
-     "domain": "ブランド戦略・パーパス・ネーミング・トンマナ", "color": "#0891b2"},
-    {"key": "kagura", "name": "神楽 迅", "title": "AIDX部長（CAIO/CDXO）", "emoji": "🤖",
-     "domain": "生成AI活用・業務自動化・DX・データ基盤", "color": "#16a34a"},
+     "domain": "ブランド戦略・パーパス・ネーミング・トンマナ", "color": "#0891b2", "rank": "bucho"},
     {"key": "saotome", "name": "早乙女 静", "title": "社長室室長", "emoji": "🏛️",
-     "domain": "振り分け・司会・統合報告・抜け漏れの番人", "color": "#475569"},
+     "domain": "振り分け・司会・統合報告・抜け漏れの番人", "color": "#475569", "rank": "bucho"},
     {"key": "common", "name": "全社共通", "title": "どの部にも効く知恵", "emoji": "🏢",
-     "domain": "仕事の進め方・共通ノウハウ", "color": "#6b7280"},
+     "domain": "仕事の進め方・共通ノウハウ", "color": "#6b7280", "rank": "bucho"},
 ]
 
 BUCHO_KEYS = [b["key"] for b in BUCHO_DEFS]
@@ -78,6 +80,8 @@ PROJECT_MAP: dict[str, str] = {
     "aidx-room": "kagura",
     # 早乙女（社長室）
     "hisho-room": "saotome", "hisho-shitsu": "saotome",
+    # 神楽（AI・DX担当 副社長・社長対話窓口の代行/成長ループ。2026-09-26新設で未登録だったため追加）
+    "aidx-shacho-daikou": "kagura",
 }
 
 # project_key で決まらないときの既定値（cto-lab は全セッション混在 → キーワードで振り分け）
@@ -199,6 +203,11 @@ def month_labels(now_month: str, n: int = 6) -> list[str]:
     return list(reversed(out))
 
 
+def day_labels(now: datetime, n: int = 10) -> list[str]:
+    """now から過去 n 日分の日付ラベル（YYYY-MM-DD）を古い順で返す（当日含む）。"""
+    return [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n - 1, -1, -1)]
+
+
 def detail(
     rows: list[dict],
     key: str,
@@ -207,6 +216,8 @@ def detail(
     now_month: str,
     recent_n: int = 20,
     top_n: int = 10,
+    now: datetime | None = None,
+    daily_n: int = 10,
 ) -> dict | None:
     """1部長分の詳細（統計＋月次推移＋最近の学び＋よく使われる知恵＋仕事内訳）。
 
@@ -238,6 +249,14 @@ def detail(
             monthly_map[m] += 1
     monthly = [{"period": m, "added": monthly_map[m]} for m in months]
 
+    days = day_labels(now, daily_n) if now is not None else []
+    daily_map = {d: 0 for d in days}
+    for r in mine:
+        day = str(r.get("created_at") or "")[:10]
+        if day in daily_map:
+            daily_map[day] += 1
+    daily = [{"period": d, "added": daily_map[d]} for d in days]
+
     recent = sorted(mine, key=lambda r: str(r.get("created_at") or ""), reverse=True)[:recent_n]
     top_recalled = sorted(
         (r for r in mine if int(r.get("recall_count") or 0) > 0),
@@ -268,6 +287,7 @@ def detail(
         "growth_pct": growth_pct,
         "recalls": recalls,
         "monthly": monthly,
+        "daily": daily,
         "recent_items": [_item(r) for r in recent],
         "top_recalled": [_item(r) for r in top_recalled],
         "top_projects": top_projects,

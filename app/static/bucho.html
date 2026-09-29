@@ -80,11 +80,18 @@ function cmpBox(label,n,pct,refLabel,color){
 
 function card(b,maxAdded){
   const bar=Math.round(b.added/Math.max(1,maxAdded)*100);
-  return `<a href="/bucho/${esc(b.key)}" class="block bg-white border border-gray-200 rounded-2xl p-5 hover:shadow-md hover:border-indigo-300 transition fade-in">
+  const isSvp=b.rank==='svp';
+  const cardCls=isSvp
+    ? 'block bg-gradient-to-br from-amber-50 to-white border-2 border-amber-300 rounded-2xl p-5 hover:shadow-md transition fade-in'
+    : 'block bg-white border border-gray-200 rounded-2xl p-5 hover:shadow-md hover:border-indigo-300 transition fade-in';
+  const badge=isSvp
+    ? '<span class="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-300 rounded-full px-2 py-0.5 ml-2">👑 副社長</span>'
+    : '';
+  return `<a href="/bucho/${esc(b.key)}" class="${cardCls}">
     <div class="flex items-center gap-3 mb-2">
       <span class="text-4xl">${b.emoji}</span>
       <div class="min-w-0">
-        <div class="font-bold text-lg text-gray-900">${esc(b.name)}</div>
+        <div class="font-bold text-lg text-gray-900 flex items-center">${esc(b.name)}${badge}</div>
         <div class="text-xs text-gray-400">${esc(b.title)}・${esc(b.domain)}</div>
       </div>
       <span class="ml-auto text-gray-300 text-xl">›</span>
@@ -125,8 +132,12 @@ async function load(){
   document.getElementById('narrative').textContent=
     `この${days}日で、会社の知恵は全部で ${fmt(total)}件 増えました。いちばん伸びたのは ${top.emoji} ${top.name}（+${fmt(top.added)}件）。カードを押すと、その部長の詳しいページが開きます。`;
   const maxAdded=Math.max(...d.buchos.map(b=>b.added),1);
-  // 昨日いちばん増えた部長を上に（昨日の件数 d1 の降順。同数は1か月の多い順で安定化）
-  const ordered=[...d.buchos].sort((a,b)=>((b.d1||0)-(a.d1||0))||((b.d30||0)-(a.d30||0)));
+  // 副社長(rank=svp)は常に最上部固定。残りは昨日いちばん増えた部長を上に
+  // （昨日の件数 d1 の降順。同数は1か月の多い順で安定化）
+  const ordered=[...d.buchos].sort((a,b)=>
+    (((b.rank==='svp')?1:0)-((a.rank==='svp')?1:0)) ||
+    ((b.d1||0)-(a.d1||0)) || ((b.d30||0)-(a.d30||0))
+  );
   cards.innerHTML=ordered.map(b=>card(b,maxAdded)).join('');
 }
 

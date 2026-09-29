@@ -27,7 +27,8 @@ router = APIRouter(tags=["nippou"])
 _WRITE_GUARD = [Depends(require_api_key)]
 
 # 表示順や絞り込みで使う部署キー。'stepup' が本命、他は将来用。
-DEPARTMENTS = ("stepup", "soumu", "koutsu", "shikujiri", "cto-room-dev", "zeus")
+# 'aidx-shacho-daikou' = 神楽 迅（AI・DX担当 副社長）の日次代行日報（2026-09-26運用開始）。
+DEPARTMENTS = ("stepup", "aidx-shacho-daikou", "soumu", "koutsu", "shikujiri", "cto-room-dev", "zeus")
 
 
 class NippouRequest(BaseModel):

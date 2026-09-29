@@ -1,5 +1,7 @@
 """app/bucho.py（部長別分類・集計）の単体テスト。"""
 
+from datetime import datetime, timezone
+
 from app import bucho
 
 
@@ -10,6 +12,11 @@ class TestClassify:
 
     def test_project_map_kujo(self):
         assert bucho.classify("monthly-cf", [], "") == "kujo"
+
+    def test_project_map_kagura(self):
+        # 2026-09-26新設・神楽（AI・DX担当 副社長）の社長代行/成長ループ。
+        # 未登録だと全社共通に誤分類されるバグの回帰テスト。
+        assert bucho.classify("aidx-shacho-daikou", [], "") == "kagura"
 
     def test_keyword_kujo(self):
         assert bucho.classify("cto-lab", ["資金繰り"], "") == "kujo"
@@ -135,6 +142,31 @@ class TestGrowthRatio:
         assert bucho.growth_ratio(0, 100) == 0.0
 
 
+class TestBuchoDefsRank:
+    def test_kagura_is_svp_and_first(self):
+        assert bucho.BUCHO_DEFS[0]["key"] == "kagura"
+        assert bucho.BUCHO_DEFS[0]["rank"] == "svp"
+        assert bucho.BUCHO_DEFS[0]["title"] == "AI・DX担当 副社長（CAIO/CDXO）"
+
+    def test_all_others_are_bucho_rank(self):
+        for d in bucho.BUCHO_DEFS[1:]:
+            assert d["rank"] == "bucho"
+
+
+class TestDayLabels:
+    def test_ten_days_oldest_first(self):
+        now = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+        days = bucho.day_labels(now, 10)
+        assert days[0] == "2026-09-21"
+        assert days[-1] == "2026-09-30"
+        assert len(days) == 10
+
+    def test_month_boundary(self):
+        now = datetime(2026, 10, 3, tzinfo=timezone.utc)
+        days = bucho.day_labels(now, 5)
+        assert days == ["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03"]
+
+
 class TestMonthLabels:
     def test_six_months(self):
         assert bucho.month_labels("2026-06") == [
@@ -182,3 +214,29 @@ class TestDetail:
         )
         assert d["total"] == 1
         assert d["recent_items"][0]["project_key"] == "knowhow"
+
+    def test_daily_without_now_is_empty(self):
+        d = bucho.detail(
+            self._rows(), "kujo",
+            "2026-05-31T00:00:00+00:00", "2026-05-01T00:00:00+00:00", "2026-06",
+        )
+        assert d["daily"] == []
+
+    def test_daily_with_now_counts_per_day(self):
+        rows = [
+            {"chunk_id": 1, "project_key": "monthly-cf", "tags": [], "content_head": "",
+             "created_at": "2026-06-10T03:00:00+00:00", "recall_count": 0},
+            {"chunk_id": 2, "project_key": "monthly-cf", "tags": [], "content_head": "",
+             "created_at": "2026-06-10T09:00:00+00:00", "recall_count": 0},
+            {"chunk_id": 3, "project_key": "monthly-cf", "tags": [], "content_head": "",
+             "created_at": "2026-05-20T00:00:00+00:00", "recall_count": 0},  # 範囲外(10日より前)
+        ]
+        now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+        d = bucho.detail(
+            rows, "kujo",
+            "2026-05-31T00:00:00+00:00", "2026-05-01T00:00:00+00:00", "2026-06",
+            now=now, daily_n=10,
+        )
+        assert len(d["daily"]) == 10
+        assert d["daily"][-1] == {"period": "2026-06-10", "added": 2}
+        assert sum(x["added"] for x in d["daily"]) == 2
