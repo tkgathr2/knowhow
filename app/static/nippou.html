@@ -57,6 +57,10 @@
     .report{ box-shadow:none;border:none;border-radius:0; }
     .lg\:w-3\/4{ width:100% !important; }
     @page{ margin:14mm; }
+    /* 2026-09-30バグチェック修正: 一覧表示化(全件縦積み)に伴い、印刷は選んでいる1件だけに絞る。
+       印刷対象マーカー(.report--print-target)が付いた1件以外は印刷から除外する。 */
+    .report{ display:none !important; }
+    .report.report--print-target{ display:block !important; }
   }
 </style>
 </head>
@@ -319,12 +323,22 @@ function renderDetail(){
   if(!reports.length){box.innerHTML='<div class="report p-8"><p class="text-sm text-gray-400">日報がありません</p></div>';return;}
   box.innerHTML=reports.map(r=>reportBlock(r)).join('<div class="h-6"></div>');
   box.querySelectorAll('[data-hl]').forEach(highlight);
+  markPrintTarget();
+}
+
+// 印刷/PDF(window.print)は選んでいる1件だけに絞る（一覧化で全件描画になったため、
+// @media print側のCSSと連動する印刷対象マーカーをここで付け替える。2026-09-30バグチェック修正）。
+function markPrintTarget(){
+  document.querySelectorAll('.report.report--print-target').forEach(el=>el.classList.remove('report--print-target'));
+  const el=document.getElementById('rpt-'+selectedId);
+  if(el) el.classList.add('report--print-target');
 }
 
 // 左の日付リストは「選択」ではなく、その日報の位置までスクロールするジャンプリンクとして使う
 function selectReport(id){
   selectedId=id;
   renderDateList();
+  markPrintTarget();
   const el=document.getElementById('rpt-'+id);
   if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
 }

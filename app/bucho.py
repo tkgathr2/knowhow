@@ -8,7 +8,28 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# 日次集計は社長がJSTで見る前提のため、日付境界をJSTで切る
+# （app/routers/koe.py・anthropic_cost.py・cost_cutter.py と同じ既存パターン踏襲）。
+_JST = timezone(timedelta(hours=9))
+
+
+def _to_jst_date(iso_str: str) -> str:
+    """ISO日時文字列(created_at等)をJSTの日付(YYYY-MM-DD)へ変換する。
+
+    パース失敗時は元の先頭10文字（旧来のUTC文字列切り出し）にフォールバックする。
+    """
+    s = (iso_str or "").strip()
+    if not s:
+        return ""
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_JST).strftime("%Y-%m-%d")
+    except ValueError:
+        return s[:10]
 
 # 部長の定義（表示順もこの順。ただしフロント(/bucho)は rank=svp を先頭固定で並べ替える）
 BUCHO_DEFS: list[dict] = [
@@ -221,21 +242,34 @@ def narrative(d: dict) -> str:
 
     parts: list[str] = []
     if growth_pct is not None:
-        parts.append(f"直近の集計期間で+{added}件（{'+' if growth_pct >= 0 else ''}{growth_pct}%）")
+        gp = growth_pct + 0.0  # -0.0 を 0.0 へ正規化（"+-0.0%"という壊れた表示を防ぐ）
+        parts.append(f"直近の集計期間で+{added}件（{'+' if gp >= 0 else ''}{gp}%）")
     else:
         parts.append(f"直近の集計期間で+{added}件（比較対象なし＝新規）")
 
-    # "本日" はまだ集計が終わっていないだけの0件がありうるため、実績のある直近日どうしで比較する
-    # （daily[-1]が今日の未確定ゼロなだけで「ペースが落ちた」と誤判定しない）。
-    nonzero_days = [x for x in daily if x.get("added", 0) > 0]
-    if len(nonzero_days) >= 2:
-        peak = max(x["added"] for x in nonzero_days)
-        latest = nonzero_days[-1]["added"]
+    # "本日" はまだ集計が終わっていないだけの0件がありうるため、末尾が0件の時だけ除外する
+    # （それより前の0件日は「実際に活動が無かった日」として保持し、連続停止を見落とさない。
+    #   2026-09-30 バグチェックで、旧実装は0件日を全て除外しており連続停止を見逃す
+    #   ケースがあると確定したための修正）。
+    trend_days = list(daily)
+    if trend_days and trend_days[-1].get("added", 0) == 0:
+        trend_days = trend_days[:-1]
+    recent_added = [x.get("added", 0) for x in trend_days]
+
+    if len(recent_added) >= 3 and all(v == 0 for v in recent_added[-3:]):
+        parts.append("。直近3日、知恵の追加がありません。稼働を確認してください")
+    elif len(recent_added) >= 2:
+        nonzero = [v for v in recent_added if v > 0]
+        peak = max(nonzero) if nonzero else 0
+        latest = recent_added[-1]
         if peak > 0 and latest < peak * 0.5:
             drop_pct = round((peak - latest) / peak * 100, 1)
             parts.append(f"。直近日はピーク(1日{peak}件)から-{drop_pct}%とペースが落ちています。要確認")
-        elif latest >= peak:
+        elif peak > 0 and latest < peak:
+            parts.append(f"。直近日はピーク(1日{peak}件)より下がっていますが大きな落ち込みではありません")
+        elif peak > 0 and latest >= peak:
             parts.append("。直近日もペースは落ちていません")
+        # peak == 0（直近が実質ノーデータ）の場合はペースについて言及しない（誤って安心させない）
 
     if recalls > 0:
         parts.append(f"。実際に使われた回数は{recalls}回")
@@ -246,8 +280,14 @@ def narrative(d: dict) -> str:
 
 
 def day_labels(now: datetime, n: int = 10) -> list[str]:
-    """now から過去 n 日分の日付ラベル（YYYY-MM-DD）を古い順で返す（当日含む）。"""
-    return [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n - 1, -1, -1)]
+    """now から過去 n 日分の日付ラベル（YYYY-MM-DD・JST基準）を古い順で返す（当日含む）。
+
+    now が naive の場合は既にJSTのつもりとして扱う（呼び出し側で変換しない前提のテスト互換用）。
+    tz付き（UTC等）の場合はJSTへ変換してから日付を切る（2026-09-30 バグチェックで確定した
+    JST早朝データが前日扱いになる不具合の修正）。
+    """
+    base = now.astimezone(_JST) if now.tzinfo is not None else now
+    return [(base - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n - 1, -1, -1)]
 
 
 def detail(
@@ -294,7 +334,7 @@ def detail(
     days = day_labels(now, daily_n) if now is not None else []
     daily_map = {d: 0 for d in days}
     for r in mine:
-        day = str(r.get("created_at") or "")[:10]
+        day = _to_jst_date(str(r.get("created_at") or ""))
         if day in daily_map:
             daily_map[day] += 1
     daily = [{"period": d, "added": daily_map[d]} for d in days]

@@ -178,6 +178,47 @@ class TestNarrative:
         d = {"total": 1, "added": 1, "growth_pct": None, "recalls": 0, "daily": [{"period": "2026-09-30", "added": 1}]}
         assert "まだ実際に使われた記録（recall）はありません" in bucho.narrative(d)
 
+    def test_three_consecutive_zero_days_is_flagged_not_silently_ok(self):
+        # 2026-09-30バグチェック回帰: 旧実装は0件日を全て除外していたため、
+        # 直近3日連続で活動ゼロでも(その前にpeakがあれば)「落ちていません」と誤表示しえた。
+        # 末尾1日(本日)は「未確定の0件」として除外されるため、確定した3連続ゼロを見せるには
+        # 末尾に4件目の0件(=本日分)を足す。
+        d = {
+            "total": 10, "added": 3, "growth_pct": 10.0, "recalls": 5,
+            "daily": [
+                {"period": "2026-09-25", "added": 3},
+                {"period": "2026-09-26", "added": 0},
+                {"period": "2026-09-27", "added": 0},
+                {"period": "2026-09-28", "added": 0},
+                {"period": "2026-09-29", "added": 0},  # 本日分(未確定として除外される)
+            ],
+        }
+        text = bucho.narrative(d)
+        assert "直近3日、知恵の追加がありません" in text
+        assert "落ちていません" not in text
+
+    def test_mid_zone_decline_is_not_silent(self):
+        # peakの50〜100%未満への低下は、旧実装ではどの分岐にも当たらず無言になっていた
+        d = {
+            "total": 16, "added": 6, "growth_pct": 20.0, "recalls": 3,
+            "daily": [
+                {"period": "2026-09-28", "added": 10},
+                {"period": "2026-09-29", "added": 7},
+            ],
+        }
+        text = bucho.narrative(d)
+        assert "下がっていますが大きな落ち込みではありません" in text
+
+    def test_peak_zero_says_nothing_about_pace(self):
+        d = {
+            "total": 0, "added": 0, "growth_pct": None, "recalls": 0,
+            "daily": [{"period": "2026-09-29", "added": 0}, {"period": "2026-09-30", "added": 0}],
+        }
+        # total=0で早期returnするため、これは「total>0だがdailyが両方0」の別ケースで検証
+        d["total"] = 1
+        text = bucho.narrative(d)
+        assert "ペース" not in text
+
 
 class TestBuchoDefsRank:
     def test_kagura_is_svp_and_first(self):
@@ -203,6 +244,14 @@ class TestDayLabels:
         days = bucho.day_labels(now, 5)
         assert days == ["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03"]
 
+    def test_jst_boundary_utc_evening_is_next_day_jst(self):
+        # 2026-09-30バグチェック回帰: UTC 22:00は既にJSTでは翌日9:00。
+        # 旧実装はUTCのまま日付を切っていたため、この時刻を「今日」とすると
+        # 実際はJSTで翌日扱いになるべきところが前日のまま出ていた。
+        now_utc_evening = datetime(2026, 9, 29, 22, 0, tzinfo=timezone.utc)  # JST: 2026-09-30 07:00
+        days = bucho.day_labels(now_utc_evening, 3)
+        assert days[-1] == "2026-09-30"
+
 
 class TestMonthLabels:
     def test_six_months(self):
@@ -212,6 +261,45 @@ class TestMonthLabels:
 
     def test_year_boundary(self):
         assert bucho.month_labels("2026-02", n=4) == ["2025-11", "2025-12", "2026-01", "2026-02"]
+
+
+class TestDailyTimezoneBoundary:
+    """narrative()/detail()のJST・UTC日付境界ズレ再現テスト（bug-check-lab 堀内逆検証確定・🟠High）。
+
+    day_labels(now, n) と detail() 内のdaily集計は、created_atのUTC文字列先頭10文字を
+    そのまま日付バケットのキーにしている。now も datetime.now(timezone.utc) をそのまま
+    使っているため、JSTで「今日」の活動が UTC基準では「前日」に計上されてしまう。
+
+    再現条件:
+      now_utc = 2026-09-30T00:30Z （JSTでは2026-09-30 09:30＝まだ「今日」の朝）
+      created_at = 2026-09-29T16:00:00+00:00
+        → UTC視点では9/29だが、+9hしたJST時刻は2026-09-30 01:00＝JSTでは「今日」9/30未明の活動。
+
+    JST基準で正しく集計するなら、この1件は day_labels の最終日（2026-09-30）の
+    バケットに入るべきだが、現状の実装は created_at 文字列の先頭10文字（"2026-09-29"）を
+    そのまま使うため前日のバケットに計上してしまう。
+    """
+
+    def test_jst_today_activity_is_not_miscounted_as_yesterday(self):
+        now_utc = datetime(2026, 9, 30, 0, 30, tzinfo=timezone.utc)
+        rows = [
+            {"chunk_id": 1, "project_key": "monthly-cf", "tags": [], "content_head": "",
+             "created_at": "2026-09-29T16:00:00+00:00", "recall_count": 0},
+        ]
+        d = bucho.detail(
+            rows, "kujo",
+            "2026-09-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00", "2026-09",
+            now=now_utc, daily_n=10,
+        )
+        # day_labels の最終日は「今日」= 2026-09-30 のはず
+        assert d["daily"][-1]["period"] == "2026-09-30"
+        # このデータはJST視点では2026-09-30 01:00の活動＝「今日」に計上されるべき。
+        # 現状の実装ではUTC文字列先頭10文字("2026-09-29")のバケットに入ってしまい、
+        # "2026-09-30"バケットは0件のまま＝JSTでは今日の活動が前日扱いになるバグの証拠。
+        assert d["daily"][-1]["added"] == 1, (
+            "JSTでは今日(2026-09-30)の活動のはずが、UTC日付境界のまま集計しているため"
+            "前日(2026-09-29)のバケットに計上されてしまっている（JST/UTC境界ズレのバグ再現）"
+        )
 
 
 class TestDetail:
@@ -243,6 +331,11 @@ class TestDetail:
         assert d["recent_items"][0]["chunk_id"] == 1   # 新しい順
         assert d["top_recalled"][0]["chunk_id"] == 1   # recall 4 が最多
         assert d["top_projects"][0]["project_key"] == "monthly-cf"
+        # {**d, **result}マージ後もBUCHO_DEFS由来のフィールドが保持されていること（回帰確認）
+        assert d["key"] == "kujo"
+        assert d["rank"] == "bucho"
+        assert d["name"] == "九条 玲"
+        assert "narrative" in d
 
     def test_sanada_excludes_others(self):
         d = bucho.detail(
